@@ -1,0 +1,53 @@
+{
+  "name": "getcompetitive-agent",
+  "version": "0.1.0",
+  "description": "Pokémon Champions DeepAgents harness: deterministic Dex query plus the staged agent-created set lifecycle (resolve -> lookup -> search -> stage_set -> save_set).",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "skills"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "smoke": "npm run build && node dist/smoke.js"
+  },
+  "keywords": [
+    "pokemon",
+    "pokemon-champions",
+    "deepagents",
+    "langchain",
+    "langgraph",
+    "competitive",
+    "vgc"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mriver15/getcompetitive-agent.git"
+  },
+  "dependencies": {
+    "@langchain/core": "^1.0.0",
+    "@langchain/langgraph": "^1.0.0",
+    "@pkmn/dex": "^0.10.11",
+    "@smogon/calc": "^0.11.0",
+    "deepagents": "^1.9.1",
+    "langchain": "^1.0.0",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.7.0"
+  }
+}
