@@ -41,11 +41,13 @@ export const lookupFactTool = tool(
     names,
     fields,
     regulation,
+    moveFilters,
   }: {
     kind: EntityType;
     names: string[];
     fields: string[];
     regulation?: string;
+    moveFilters?: { types?: string[]; categories?: Array<"Physical" | "Special" | "Status">; minBasePower?: number; maxBasePower?: number };
   }) => {
     const dex = getDex(GEN);
     const results: Array<Record<string, unknown>> = [];
@@ -59,7 +61,7 @@ export const lookupFactTool = tool(
       let projected: Record<string, unknown>;
       switch (kind) {
         case "species": {
-          projected = await projectSpecies(dex.species.get(res.canonicalName), fields);
+          projected = await projectSpecies(dex.species.get(res.canonicalName), fields, moveFilters);
           if (regulation) projected.legalIn = isLegalIn(dex.species.get(res.canonicalName), regulation);
           break;
         }
@@ -84,12 +86,21 @@ export const lookupFactTool = tool(
   {
     name: "lookup_fact",
     description:
-      "Atomic lookup with a required fields projection. Returns only the requested fields plus identity (id/name). Batch many names in one call. Use for specific known facts about named entities (typing, base stats, abilities, move data, items, natures, a small learnset slice, or form relationships).",
+      "Atomic lookup with a required fields projection. Returns only the requested fields plus identity (id/name). Batch many names in one call. Use for specific known facts about named entities (typing, base stats, abilities, move data, items, natures, a small learnset slice, or form relationships). For a species' learnable moves, narrow with moveFilters (type / category / base power).",
     schema: z.object({
       kind: ENTITY_KIND.describe("Entity type to look up."),
       names: z.array(z.string()).min(1).describe("Entity names to resolve and look up."),
       fields: z.array(z.string()).describe("Fields to project (e.g. 'types', 'baseStats.spe'). Only these plus identity are returned."),
       regulation: z.string().optional().describe("Regulation id to also report legalIn (species kind)."),
+      moveFilters: z
+        .object({
+          types: z.array(z.string()).optional().describe("Keep only moves of these types."),
+          categories: z.array(z.enum(["Physical", "Special", "Status"])).optional().describe("Keep only these move categories (Status = non-damaging)."),
+          minBasePower: z.number().int().min(0).optional().describe("Minimum base power."),
+          maxBasePower: z.number().int().min(0).optional().describe("Maximum base power."),
+        })
+        .optional()
+        .describe("Narrow the 'moves' field. When set, moves are returned as {name, type, category, basePower}."),
     }),
   },
 );

@@ -64,6 +64,9 @@ async function main(): Promise<void> {
   check("lookup_fact projects only requested fields + identity", ap?.name === "Annihilape" && Array.isArray(ap?.types) && typeof ap?.["baseStats.spe"] === "number" && ap?.baseStats === undefined && ap?.abilities === undefined, ap);
   const moves = JSON.parse(await lookupFactTool.invoke({ kind: "move", names: ["Rage Fist"], fields: ["type", "basePower"] }, toolConfig()));
   check("lookup_fact supports non-species kinds", moves.results?.[0]?.name === "Rage Fist" && typeof moves.results?.[0]?.basePower === "number", moves.results?.[0]);
+  const statusMoves = JSON.parse(await lookupFactTool.invoke({ kind: "species", names: ["Annihilape"], fields: ["moves"], moveFilters: { categories: ["Status"] } }, toolConfig()));
+  const sm = statusMoves.results?.[0]?.moves;
+  check("lookup_fact moveFilters narrows moves", Array.isArray(sm) && sm.length > 0 && sm.length < 60 && sm.every((m: { category?: string }) => m.category === "Status"), sm?.length);
 
   // L-6..L-9: search_dex typed constraints
   const bulky = JSON.parse(await searchDexTool.invoke({ entity: "species", filters: { minBaseStats: { hp: 100, def: 80 }, capabilitiesAny: ["priority"] }, regulation: "m-b", fields: ["types"] }, toolConfig()));

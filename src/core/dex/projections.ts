@@ -37,14 +37,43 @@ function project(obj: Record<string, unknown>, fields: string[]): Record<string,
   return out;
 }
 
-export async function projectSpecies(sp: Species, fields: string[]): Promise<Record<string, unknown>> {
+export interface MoveFilters {
+  types?: string[];
+  categories?: Array<"Physical" | "Special" | "Status">;
+  minBasePower?: number;
+  maxBasePower?: number;
+}
+
+function matchesMoveFilter(move: Move, f: MoveFilters | undefined): boolean {
+  if (!f) return true;
+  if (f.types?.length && !f.types.some((t) => move.type === t)) return false;
+  if (f.categories?.length && !f.categories.includes(move.category)) return false;
+  const bp = move.basePower ?? 0;
+  if (f.minBasePower !== undefined && bp < f.minBasePower) return false;
+  if (f.maxBasePower !== undefined && bp > f.maxBasePower) return false;
+  return true;
+}
+
+export async function projectSpecies(
+  sp: Species,
+  fields: string[],
+  moveFilters?: MoveFilters,
+): Promise<Record<string, unknown>> {
   const flat = speciesToObj(sp) as unknown as Record<string, unknown>;
   const out: Record<string, unknown> = { name: sp.name, id: sp.id };
   const remaining: string[] = [];
   for (const f of fields) {
     if (f === "moves") {
-      const learnable = await learnableMoveIds(getDex(GEN), sp);
-      out.moves = [...learnable].map((id) => getDex(GEN).moves.get(id).name).sort();
+      const dex = getDex(GEN);
+      const learnable = await learnableMoveIds(dex, sp);
+      const moves = [...learnable]
+        .map((id) => dex.moves.get(id))
+        .filter((m) => m.exists && matchesMoveFilter(m, moveFilters));
+      out.moves = moveFilters
+        ? moves
+            .map((m) => ({ name: m.name, type: m.type, category: m.category, basePower: m.basePower }))
+            .sort((a, b) => a.name.localeCompare(b.name))
+        : moves.map((m) => m.name).sort();
     } else if (f === "learnset") {
       const ls = await getDex(GEN).learnsets.getByID(toID(sp.name));
       out.learnset = learnsetToObj(ls);
