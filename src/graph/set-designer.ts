@@ -12,11 +12,14 @@
 import { Annotation, StateGraph, START, END, messagesStateReducer, getStore, getConfig } from "@langchain/langgraph";
 import type { BaseMessage } from "@langchain/core/messages";
 import { AIMessage, HumanMessage, SystemMessage } from "@langchain/core/messages";
+import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
+import { initChatModel } from "langchain";
 import {
   type SetDraft,
   type StageSetResult,
   type CanonicalSet,
   type ProposalArtifact,
+  SetDraftSchema,
 } from "../core/set/model.js";
 import { stageSet } from "../core/set/stage.js";
 import { resolveEntity } from "../core/dex/resolver.js";
@@ -238,13 +241,36 @@ function routeAfterResolve(state: DesignerStateT): "design" | "finalize" {
   return "design";
 }
 
-export function buildSetDesignerGraph(opts: {
-  designModel: DesignModel;
+export interface SetDesignerGraphOptions {
+  /** A ready structured-output runnable (tests / explicit override). */
+  designModel?: DesignModel;
+  /** Model string or chat-model instance the design node resolves lazily. */
+  model?: string | BaseChatModel;
   /** Default regulation when the task does not state one. */
   regulation?: string;
-}) {
+}
+
+export function buildSetDesignerGraph(opts: SetDesignerGraphOptions) {
   const regulation = opts.regulation ?? "m-c";
-  const design = (state: DesignerStateT) => designNode(state, opts.designModel);
+
+  // Resolve the structured design model lazily (temperature 0), so the graph
+  // can be compiled synchronously for `langgraph dev`.
+  const modelArg = opts.model;
+  let designModelPromise: Promise<DesignModel> | undefined;
+  const designModel = (): Promise<DesignModel> => {
+    if (opts.designModel) return Promise.resolve(opts.designModel);
+    if (!modelArg) throw new Error("buildSetDesignerGraph requires `designModel` or `model`.");
+    designModelPromise ??= (async () => {
+      const m =
+        typeof modelArg === "string"
+          ? await initChatModel(modelArg, { temperature: 0 })
+          : modelArg;
+      return m.withStructuredOutput(SetDraftSchema) as unknown as DesignModel;
+    })();
+    return designModelPromise;
+  };
+
+  const design = async (state: DesignerStateT) => designNode(state, await designModel());
   const resolve = (state: DesignerStateT) => resolveNode(state, regulation);
 
   const graph = new StateGraph(DesignerState)

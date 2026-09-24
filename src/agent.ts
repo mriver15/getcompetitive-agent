@@ -16,7 +16,6 @@ import {
 } from "deepagents";
 import { InMemoryStore, MemorySaver, type BaseStore, type BaseCheckpointSaver } from "@langchain/langgraph";
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
-import { initChatModel } from "langchain";
 import { resolveEntityTool, lookupFactTool, searchDexTool, expandResultTool } from "./tools/dex-query.js";
 import { stageSetTool, saveSetTool, searchSavedSetsTool } from "./tools/set-lifecycle.js";
 import {
@@ -44,7 +43,7 @@ export interface BuildChampionsAgentOptions {
   store?: BaseStore;
 }
 
-export async function buildChampionsAgent(opts: BuildChampionsAgentOptions = {}) {
+export function buildChampionsAgent(opts: BuildChampionsAgentOptions = {}) {
   // Precedence: explicit `model` -> CHAMPIONS_MODEL -> DeepSeek (if a key is
   // present) -> OpenAI. `deepseek:deepseek-chat` uses @langchain/deepseek,
   // which reads DEEPSEEK_API_KEY.
@@ -53,20 +52,11 @@ export async function buildChampionsAgent(opts: BuildChampionsAgentOptions = {})
     process.env.CHAMPIONS_MODEL ??
     (process.env.DEEPSEEK_API_KEY ? "deepseek:deepseek-chat" : "openai:gpt-5.5");
 
-  let designModel: DesignModel;
-  if (opts.designModel) {
-    designModel = opts.designModel;
-  } else if (typeof model === "string") {
-    designModel = (await initChatModel(model, { temperature: 0 })).withStructuredOutput(SetDraftSchema);
-  } else {
-    designModel = model.withStructuredOutput(SetDraftSchema);
-  }
-
   const setDesigner: CompiledSubAgent = {
     name: "set-designer",
     description:
       "Designs a single competitive Pokémon Champions set from a goal and a species: searches dex candidates, drafts a typed SetDraft, validates it (learnset/ability/spread/regulation), benchmarks it, and returns a staged ProposalRef with evidence. Use when the user asks to build or design a set, e.g. 'build me a bulky Annihilape for this team'.",
-    runnable: buildSetDesignerGraph({ designModel }),
+    runnable: buildSetDesignerGraph({ model, designModel: opts.designModel }),
   };
 
   const store = opts.store ?? new InMemoryStore();

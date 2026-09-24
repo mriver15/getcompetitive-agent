@@ -1,0 +1,7 @@
+{
+  "dependencies": ["."],
+  "graphs": {
+    "agent": "./src/graph-entrypoint.ts:agent"
+  },
+  "env": ".env"
+}

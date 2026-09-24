@@ -65,6 +65,24 @@ Model resolution (first match wins):
 
 So with `export DEEPSEEK_API_KEY=…` in your shell, `buildChampionsAgent()` just works on DeepSeek (`deepseek-chat`); pass `deepseek:deepseek-reasoner` explicitly for the reasoning model.
 
+## Native client (web UI)
+
+The agent is a compiled LangGraph, so any LangGraph client can drive it. The [Deep Agents UI](https://github.com/langchain-ai/deep-agents-ui) is a Next.js chat frontend built for exactly that:
+
+```bash
+# 1. Install the LangGraph CLI (Python tool)
+uv tool install langgraph-cli      # or: pipx install langgraph-cli
+
+# 2. Serve the agent (from this repo)
+langgraph dev                      # API at http://127.0.0.1:2024, assistant id "agent"
+
+# 3. Run the UI (separate clone)
+git clone https://github.com/langchain-ai/deep-agents-ui.git
+cd deep-agents-ui && yarn install && yarn dev   # http://localhost:3000
+```
+
+Open `http://localhost:3000`, enter Deployment URL `http://127.0.0.1:2024` and Assistant ID `agent`. The shell running `langgraph dev` must export `DEEPSEEK_API_KEY` (or `CHAMPIONS_MODEL`). See [`langgraph.json`](langgraph.json).
+
 
 ## Layout
 
