@@ -18,7 +18,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "smoke": "npm run build && node dist/smoke.js"
+    "smoke": "npm run build && node dist/smoke.js",
+    "demo": "npm run build && node demo.mjs"
   },
   "keywords": [
     "pokemon",
