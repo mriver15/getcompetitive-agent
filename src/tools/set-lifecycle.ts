@@ -116,7 +116,15 @@ export const searchSavedSetsTool = tool(
     if (!store) return JSON.stringify({ count: 0, sets: [] });
     const sets = await listSavedSets(store, getUserId(runtime));
     const filtered = filterSavedSets(sets, { ...args, limit: args.limit ?? 20 });
-    return JSON.stringify({ count: filtered.length, sets: filtered });
+    const summaries = filtered.map((s) => ({
+      setRef: s.id,
+      species: s.set.species,
+      regulation: s.regulation,
+      basis: s.basis,
+      origin: s.origin.type,
+      savedAt: s.createdAt,
+    }));
+    return JSON.stringify({ count: filtered.length, sets: summaries });
   },
   {
     name: "search_saved_sets",

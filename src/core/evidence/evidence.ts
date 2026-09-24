@@ -63,7 +63,7 @@ export async function readEvidenceArtifact(
   return item ? (item.value as unknown as EvidenceArtifact) : null;
 }
 
-/** Compact summary — provenance + operation + result, without the raw input. */
+/** Compact summary — provenance + operation + a trimmed result, never the raw input. */
 export function summarizeEvidence(a: EvidenceArtifact): Record<string, unknown> {
   return {
     evidenceRef: a.id,
@@ -72,6 +72,28 @@ export function summarizeEvidence(a: EvidenceArtifact): Record<string, unknown> 
     datasetVersion: a.datasetVersion,
     sourceAsOf: a.sourceAsOf,
     sampleSize: a.sampleSize,
-    result: a.result,
+    result: compactResult(a.operation, a.result),
   };
+}
+
+function compactResult(operation: string, result: unknown): unknown {
+  if (operation === "calculate_damage") {
+    const r = result as {
+      attacker?: { species?: string };
+      defender?: { species?: string };
+      move?: string;
+      damageRange?: [number, number];
+      koChance?: string;
+      description?: string;
+    };
+    return {
+      attacker: r.attacker?.species,
+      defender: r.defender?.species,
+      move: r.move,
+      damageRange: r.damageRange,
+      koChance: r.koChance,
+      description: r.description,
+    };
+  }
+  return result;
 }

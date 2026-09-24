@@ -115,7 +115,7 @@ async function main(): Promise<void> {
 
   // S-12: search_saved_sets (array filters)
   const found = JSON.parse(await searchSavedSetsTool.invoke({ species: ["Annihilape"], basis: ["proposed"] }, toolConfig()));
-  check("search_saved_sets finds the saved set", found.count === 1 && found.sets?.[0]?.set?.species === "Annihilape", found.count);
+  check("search_saved_sets finds the saved set", found.count === 1 && found.sets?.[0]?.species === "Annihilape", found.count);
 
   console.log("== Evidence / benchmarks ==");
 
