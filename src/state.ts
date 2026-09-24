@@ -9,7 +9,7 @@ import { StateSchema } from "@langchain/langgraph";
 import { z } from "zod";
 
 export const contextSchema = z.object({
-  userId: z.string().describe("The calling user's identity; namespaces the durable Set Library."),
+  userId: z.string().optional().describe("The calling user's identity; namespaces the durable Set Library. Defaults to 'default'."),
   regulation: z.string().optional().describe("Default regulation id for this run (m-a..m-c)."),
 });
 

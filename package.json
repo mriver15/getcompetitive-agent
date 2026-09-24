@@ -40,9 +40,9 @@
     "url": "git+https://github.com/mriver15/getcompetitive-agent.git"
   },
   "dependencies": {
-    "@langchain/core": "^1.0.0",
+    "@langchain/core": "^1.2.12",
     "@langchain/deepseek": "^1.1.13",
-    "@langchain/langgraph": "^1.0.0",
+    "@langchain/langgraph": "^1.4.17",
     "@pkmn/dex": "^0.10.11",
     "@smogon/calc": "^0.11.0",
     "deepagents": "^1.9.1",
