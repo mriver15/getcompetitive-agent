@@ -45,7 +45,13 @@ export interface BuildChampionsAgentOptions {
 }
 
 export async function buildChampionsAgent(opts: BuildChampionsAgentOptions = {}) {
-  const model = opts.model ?? process.env.CHAMPIONS_MODEL ?? "openai:gpt-5.5";
+  // Precedence: explicit `model` -> CHAMPIONS_MODEL -> DeepSeek (if a key is
+  // present) -> OpenAI. `deepseek:deepseek-chat` uses @langchain/deepseek,
+  // which reads DEEPSEEK_API_KEY.
+  const model =
+    opts.model ??
+    process.env.CHAMPIONS_MODEL ??
+    (process.env.DEEPSEEK_API_KEY ? "deepseek:deepseek-chat" : "openai:gpt-5.5");
 
   let designModel: DesignModel;
   if (opts.designModel) {

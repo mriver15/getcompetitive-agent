@@ -43,8 +43,8 @@ The smoke path exercises the MVP gate: *"Build me a bulky Annihilape"* →
 import { buildChampionsAgent } from "getcompetitive-agent";
 
 const agent = await buildChampionsAgent({
-  model: "openai:gpt-5.5",          // provider:model or a ChatModel instance
-  autoSaveAgentProposals: false,     // save_set requires human approval
+  // model: "deepseek:deepseek-chat",   // provider:model or a ChatModel instance
+  autoSaveAgentProposals: false,        // save_set requires human approval
 });
 
 const config = {
@@ -53,6 +53,16 @@ const config = {
 };
 await agent.invoke({ messages: [{ role: "user", content: "Build me a bulky Annihilape for this team" }] }, config);
 ```
+
+Model resolution (first match wins):
+
+1. `model` option (`provider:model` or a chat-model instance);
+2. `CHAMPIONS_MODEL` env var;
+3. `deepseek:deepseek-chat` when `DEEPSEEK_API_KEY` is set (`@langchain/deepseek`);
+4. `openai:gpt-5.5` otherwise.
+
+So with `export DEEPSEEK_API_KEY=…` in your shell, `buildChampionsAgent()` just works on DeepSeek (`deepseek-chat`); pass `deepseek:deepseek-reasoner` explicitly for the reasoning model.
+
 
 ## Layout
 
