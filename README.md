@@ -31,7 +31,8 @@ number in an answer originates from model memory.
 ```bash
 npm install
 npm run smoke     # builds + runs the deterministic end-to-end smoke path (no key/network)
-npm run demo      # interactive agent; needs an LLM key (DEEPSEEK_API_KEY or CHAMPIONS_MODEL)
+npm run chat      # interactive multi-turn REPL; needs an LLM key (DEEPSEEK_API_KEY or CHAMPIONS_MODEL)
+npm run demo      # one-shot: `npm run demo -- "…query…"`
 ```
 
 The smoke path exercises the MVP gate: *"Build me a bulky Annihilape"* →
