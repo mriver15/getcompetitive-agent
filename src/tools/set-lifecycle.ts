@@ -71,26 +71,20 @@ export const stageSetTool = tool(
 export const saveSetTool = tool(
   async (args: { sourceRef: string; label?: string; tags?: string[] }, runtime) => {
     const store = getStore(runtime);
-    if (!store) return JSON.stringify({ error: "No store available to persist a set." });
+    if (!store) return "No store available to persist a set.";
 
     const proposal = await readProposal(store, getThreadId(runtime), args.sourceRef);
     if (!proposal) {
-      return JSON.stringify({
-        error: `No staged proposal found for sourceRef "${args.sourceRef}". save_set persists only a validated ProposalRef, never model-emitted JSON.`,
-      });
+      return `No staged proposal found for "${args.sourceRef}" — save_set persists only a validated ProposalRef, never model-emitted JSON.`;
     }
 
     const { ref, saved, deduped } = await saveSet(store, getUserId(runtime), proposal, {
       label: args.label,
       tags: args.tags,
     });
-    // Compact summary only — the full SavedSet is queryable via search_saved_sets.
-    return JSON.stringify({
-      setRef: ref,
-      deduped,
-      species: saved.set.species,
-      regulation: saved.regulation,
-    });
+    return deduped
+      ? `Already saved ${ref} (${saved.set.species}, ${saved.regulation}); no new record.`
+      : `Saved ${ref} (${saved.set.species}, ${saved.regulation}).`;
   },
   {
     name: "save_set",

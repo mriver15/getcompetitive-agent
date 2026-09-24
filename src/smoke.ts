@@ -7,6 +7,7 @@
  */
 import { InMemoryStore } from "@langchain/langgraph";
 import { HumanMessage } from "@langchain/core/messages";
+import type { ToolRunnableConfig } from "@langchain/core/tools";
 import { resolveEntityTool, lookupFactTool, searchDexTool, expandResultTool } from "./tools/dex-query.js";
 import { stageSetTool, saveSetTool, searchSavedSetsTool } from "./tools/set-lifecycle.js";
 import { calculateDamageTool, calculateSpeedTool, readEvidenceTool } from "./tools/evidence.js";
@@ -20,7 +21,7 @@ const toolConfig = (threadId = "smoke-thread", userId = "smoke-user") =>
     configurable: { thread_id: threadId, userId },
     store,
     context: { userId },
-  }) as never;
+  }) as unknown as ToolRunnableConfig;
 
 let failures = 0;
 function check(label: string, ok: boolean, detail?: unknown): void {
@@ -103,14 +104,14 @@ async function main(): Promise<void> {
   check("stage_set rejects illegal ability + move", illegal.ok === false && illegal.errors.length >= 2, illegal.errors);
 
   // S-7..S-9: save_set + dedup
-  const saved1 = JSON.parse(await saveSetTool.invoke({ sourceRef: staged.proposalRef }, toolConfig()));
-  check("save_set persists by ProposalRef (CR-8)", saved1.setRef?.startsWith("set:") && saved1.deduped === false, saved1);
-  const saved2 = JSON.parse(await saveSetTool.invoke({ sourceRef: staged.proposalRef }, toolConfig()));
-  check("save_set dedups identical save (S-9)", saved2.deduped === true && saved2.setRef === saved1.setRef, saved2);
+  const saved1 = await saveSetTool.invoke({ sourceRef: staged.proposalRef }, toolConfig());
+  check("save_set persists by ProposalRef (CR-8)", typeof saved1 === "string" && saved1.includes("set:"), saved1);
+  const saved2 = await saveSetTool.invoke({ sourceRef: staged.proposalRef }, toolConfig());
+  check("save_set dedups identical save (S-9)", typeof saved2 === "string" && saved2.includes("Already saved"), saved2);
 
   // CR-8: save_set refuses a non-proposal sourceRef.
-  const refused = JSON.parse(await saveSetTool.invoke({ sourceRef: "set:deadbeef" }, toolConfig()));
-  check("save_set refuses a non-staged sourceRef", typeof refused.error === "string", refused);
+  const refused = await saveSetTool.invoke({ sourceRef: "set:deadbeef" }, toolConfig());
+  check("save_set refuses a non-staged sourceRef", typeof refused === "string" && refused.includes("No staged proposal"), refused);
 
   // S-12: search_saved_sets (array filters)
   const found = JSON.parse(await searchSavedSetsTool.invoke({ species: ["Annihilape"], basis: ["proposed"] }, toolConfig()));
@@ -119,23 +120,21 @@ async function main(): Promise<void> {
   console.log("== Evidence / benchmarks ==");
 
   // S-5 / CR-3: benchmark emits ENGINE evidence
-  const dmg = JSON.parse(
-    await calculateDamageTool.invoke(
-      {
-        attacker: { species: "Annihilape", level: 50, nature: "Adamant", evs: { atk: 252 }, ability: "Defiant" },
-        defender: { species: "Incineroar", level: 50, nature: "Careful", evs: { hp: 252, spd: 252 } },
-        move: "Drain Punch",
-      },
-      toolConfig(),
-    ),
+  const dmg = await calculateDamageTool.invoke(
+    {
+      attacker: { species: "Annihilape", level: 50, nature: "Adamant", evs: { atk: 252 }, ability: "Defiant" },
+      defender: { species: "Incineroar", level: 50, nature: "Careful", evs: { hp: 252, spd: 252 } },
+      move: "Drain Punch",
+    },
+    toolConfig(),
   );
-  check("calculate_damage emits ENGINE evidence ref", !!dmg.evidenceRef?.startsWith("evidence:") && dmg.provenance === "ENGINE", dmg.evidenceRef);
+  check("calculate_damage returns a readable result + evidence ref", typeof dmg === "string" && dmg.includes("damage") && dmg.includes("evidence:"), dmg);
 
   const spd = JSON.parse(await calculateSpeedTool.invoke({ species: "Annihilape", nature: "Adamant", championsPoints: { hp: 32, atk: 32, spe: 2 } }, toolConfig()));
   check("calculate_speed returns final speed + evidence", typeof spd.result?.speed === "number" && !!spd.evidenceRef, spd.result?.speed);
 
-  const evRead = JSON.parse(await readEvidenceTool.invoke({ evidenceRef: dmg.evidenceRef }, toolConfig()));
-  check("read_evidence returns compact summary", evRead.operation === "calculate_damage" && evRead.result !== undefined, evRead.operation);
+  const evRead = JSON.parse(await readEvidenceTool.invoke({ evidenceRef: spd.evidenceRef }, toolConfig()));
+  check("read_evidence returns compact summary", evRead.operation === "calculate_speed" && evRead.result !== undefined, evRead.operation);
 
   // WEB fallback: without TAVILY_API_KEY the tool degrades to a clear error.
   const web = JSON.parse(await webSearchTool.invoke({ query: "Annihilape usage stats" }, toolConfig()));

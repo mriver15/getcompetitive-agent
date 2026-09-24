@@ -37,20 +37,8 @@ export const calculateDamageTool = tool(
       const evidence = buildEvidence("ENGINE", "calculate_damage", { attacker: args.attacker, defender: args.defender, move: args.move }, result);
       const store = getStore(runtime);
       if (store) await writeEvidence(store, getThreadId(runtime), evidence);
-      // Compact summary only — the full calc lives in the evidence artifact (read_evidence).
-      return JSON.stringify({
-        evidenceRef: evidence.id,
-        operation: evidence.operation,
-        provenance: evidence.provenance,
-        result: {
-          attacker: result.attacker.species,
-          defender: result.defender.species,
-          move: result.move,
-          damageRange: result.damageRange,
-          koChance: result.koChance,
-          description: result.description,
-        },
-      });
+      const ko = result.koChance ? ` (${result.koChance})` : "";
+      return `${result.move} vs ${result.defender.species}: ${result.damageRange[0]}-${result.damageRange[1]} damage${ko}. Evidence: ${evidence.id}`;
     } catch (e) {
       return JSON.stringify({ error: (e as Error).message });
     }
