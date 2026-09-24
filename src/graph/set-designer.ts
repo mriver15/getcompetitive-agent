@@ -46,6 +46,7 @@ const DesignerState = Annotation.Root({
   draft: Annotation<SetDraft | undefined>(lastValue<SetDraft | undefined>(undefined)),
   stageResult: Annotation<StageSetResult | undefined>(lastValue<StageSetResult | undefined>(undefined)),
   canonicalSet: Annotation<CanonicalSet | undefined>(lastValue<CanonicalSet | undefined>(undefined)),
+  benchmarkResult: Annotation<Record<string, unknown> | undefined>(lastValue<Record<string, unknown> | undefined>(undefined)),
   proposalRef: Annotation<string>(lastValue("")),
   evidenceRefs: Annotation<string[]>(lastValue<string[]>([])),
   repairCount: Annotation<number>(lastValue(0)),
@@ -142,7 +143,7 @@ async function benchmarkNode(state: DesignerStateT): Promise<Partial<DesignerSta
   const artifact = buildEvidence("ENGINE", "calculate_speed", { species: sp.name, level: canonical.level, nature: canonical.nature, evs }, result);
   const store = getStore();
   if (store) await writeEvidence(store, currentThreadId(), artifact);
-  return { evidenceRefs: [artifact.id] };
+  return { evidenceRefs: [artifact.id], benchmarkResult: result };
 }
 
 async function finalizeNode(state: DesignerStateT): Promise<Partial<DesignerStateT>> {
@@ -169,8 +170,55 @@ async function finalizeNode(state: DesignerStateT): Promise<Partial<DesignerStat
   return {
     proposalRef: artifact.id,
     evidenceRefs: artifact.evidenceRefs,
-    messages: [new AIMessage(`Staged proposal ${artifact.id} (${artifact.canonicalSet.species}, legal in ${state.regulation}).`)],
+    messages: [new AIMessage(formatProposal(artifact, state))],
   };
+}
+
+/** Render the staged set + benchmark evidence as a supervisor-presentable summary. */
+function formatProposal(artifact: ProposalArtifact, state: DesignerStateT): string {
+  const s = artifact.canonicalSet;
+  const displaySpecies = s.forme ? `${s.species} (${s.forme})` : s.species;
+  const lines = [
+    `Staged proposal ref: ${artifact.id}`,
+    `Regulation: ${state.regulation} (legal: ${artifact.validation.legal})`,
+    "",
+    "Set:",
+    `- Species: ${displaySpecies}`,
+    `- Item: ${s.item ?? "none"}`,
+    `- Ability: ${s.ability ?? "none"}`,
+    `- Nature: ${s.nature ?? "Serious"}`,
+    `- Moves: ${s.moves.join(", ") || "none"}`,
+    `- EVs: ${formatEvs(s.evs)}`,
+    `- Champions points: ${championsPointsFromEvs(s.evs)}`,
+    `- Level: ${s.level}`,
+  ];
+  const b = state.benchmarkResult as { speed?: number; nature?: string; level?: number; stats?: Record<string, number> } | undefined;
+  if (b) {
+    lines.push("", "Benchmark (ENGINE evidence):", `- Speed: ${b.speed} (L${b.level ?? s.level} ${b.nature ?? "Serious"})`, `- Final stats: ${formatStats(b.stats)}`);
+  }
+  if (artifact.evidenceRefs.length) {
+    lines.push("", `Evidence refs: ${artifact.evidenceRefs.join(", ")}`);
+  }
+  return lines.join("\n");
+}
+
+const STAT_ORDER = ["hp", "atk", "def", "spa", "spd", "spe"];
+
+function formatEvs(evs?: Record<string, number>): string {
+  if (!evs) return "none";
+  const parts = STAT_ORDER.filter((k) => (evs[k] ?? 0) > 0).map((k) => `${k.toUpperCase()} ${evs[k]}`);
+  return parts.join(" / ") || "none";
+}
+
+function championsPointsFromEvs(evs?: Record<string, number>): string {
+  if (!evs) return "none";
+  const parts = STAT_ORDER.filter((k) => (evs[k] ?? 0) > 0).map((k) => `${k.toUpperCase()} ${Math.round(evs[k] / 8)}`);
+  return parts.join(" / ") || "none";
+}
+
+function formatStats(stats?: Record<string, number>): string {
+  if (!stats) return "n/a";
+  return STAT_ORDER.map((k) => `${k.toUpperCase()} ${stats[k] ?? 0}`).join(" / ");
 }
 
 function currentThreadId(): string {

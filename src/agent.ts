@@ -57,7 +57,7 @@ export async function buildChampionsAgent(opts: BuildChampionsAgentOptions = {})
   if (opts.designModel) {
     designModel = opts.designModel;
   } else if (typeof model === "string") {
-    designModel = (await initChatModel(model)).withStructuredOutput(SetDraftSchema);
+    designModel = (await initChatModel(model, { temperature: 0 })).withStructuredOutput(SetDraftSchema);
   } else {
     designModel = model.withStructuredOutput(SetDraftSchema);
   }

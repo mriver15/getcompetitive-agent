@@ -140,6 +140,9 @@ async function main(): Promise<void> {
   );
   check("designer graph stages a ProposalRef", !!gres.proposalRef?.startsWith("proposal:"), gres.proposalRef);
   check("designer graph produced evidence refs", Array.isArray(gres.evidenceRefs) && gres.evidenceRefs.length === 1, gres.evidenceRefs);
+  const gcontent = gres.messages?.at(-1)?.content;
+  const gmsg = typeof gcontent === "string" ? gcontent : "";
+  check("designer graph message includes set + evidence", gmsg.includes("Annihilape") && gmsg.includes("Leftovers") && gmsg.includes("Rage Fist") && gmsg.includes("Evidence refs"), gmsg);
   const proposalInStore = await store.get(["proposals", "graph-thread"], gres.proposalRef);
   check("designer graph wrote the proposal artifact to the store", !!proposalInStore, proposalInStore?.key);
 
