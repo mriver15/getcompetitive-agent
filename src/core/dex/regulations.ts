@@ -16,6 +16,7 @@
  * to `scripts/extract-regs.mjs`, run it, then `npm test`.
  */
 import raw from './regulations.data.js';
+import { toID } from './dex.js';
 
 export type BattleType = 'Double Battles';
 
@@ -173,4 +174,17 @@ export function getRegulationSet(query: string): RegulationSet | undefined {
     const name = s.name.toLowerCase().replace(/[^a-z0-9]/g, '');
     return id === q || name === q || s.name.toLowerCase() === query.toLowerCase();
   });
+}
+
+/**
+ * The complete Champions roster: every base species legal in at least one
+ * Regulation Set (M-A..M-C), keyed by canonical id. This is the universe of
+ * "real" Champions Pokémon — CAP fakemon and non-roster species are excluded.
+ */
+export function getChampionsRoster(): Set<string> {
+  const roster = new Set<string>();
+  for (const set of REGULATION_SETS) {
+    for (const name of set.eligibleSpecies) roster.add(toID(name));
+  }
+  return roster;
 }

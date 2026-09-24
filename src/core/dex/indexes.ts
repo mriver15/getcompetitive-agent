@@ -6,7 +6,7 @@
  */
 import type { Species } from "@pkmn/dex";
 import { getDex, toID, learnableMoveIds, type GenerationNum } from "./dex.js";
-import { REGULATION_SETS } from "./regulations.js";
+import { REGULATION_SETS, getChampionsRoster } from "./regulations.js";
 import { buildCapabilityIndex, type CapabilityIndex } from "./taxonomy.js";
 
 export const DATASET_VERSION = "showdown-gen9@2026-09";
@@ -62,17 +62,21 @@ export async function getDexIndexes(gen: GenerationNum = 9): Promise<DexIndexes>
   const typesToSpecies = new Map<string, Set<string>>();
   const abilitiesToSpecies = new Map<string, Set<string>>();
   const speciesToAbilities = new Map<string, Set<string>>();
+  const roster = getChampionsRoster();
 
   for (const s of all) {
+    if (s.num < 1) continue; // exclude CAP fakemon and any non-official entry
     speciesById.set(s.id, s);
     const abilities = Object.values(s.abilities ?? {}).filter((a) => a && a !== "No Ability");
     speciesToAbilities.set(s.id, new Set(abilities.map(toID)));
     if (!s.forme && !s.isMega && !s.battleOnly) {
+      if (!roster.has(toID(s.name))) continue; // only Champions Regulation Set species
       baseSpeciesById.set(s.id, s);
       for (const t of s.types) add(typesToSpecies, toID(t), s.id);
       for (const a of abilities) add(abilitiesToSpecies, toID(a), s.id);
     } else {
       const baseId = toID(s.baseSpecies || s.name);
+      if (!roster.has(baseId)) continue; // forms of non-roster species
       if (baseId !== s.id) formToBase.set(s.id, baseId);
     }
   }

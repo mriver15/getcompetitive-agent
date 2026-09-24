@@ -7,6 +7,7 @@
  */
 import type { ModdedDex } from "@pkmn/dex";
 import { getDex, toID, type GenerationNum } from "./dex.js";
+import { getChampionsRoster } from "./regulations.js";
 
 export type EntityType = "species" | "move" | "item" | "ability" | "nature";
 export type ResolutionStatus = "exact" | "alias" | "form" | "fuzzy" | "ambiguous" | "not_found";
@@ -107,8 +108,12 @@ function isForm(s: { forme?: string; baseSpecies?: string; name: string }): bool
 }
 
 function resolveSpecies(dex: ModdedDex, query: string, normalized: string): ResolutionResult {
+  const roster = getChampionsRoster();
+  const inRoster = (s: { num: number; baseSpecies?: string; name: string }) =>
+    s.num >= 1 && roster.has(toID(s.baseSpecies || s.name));
+
   const direct = dex.species.get(query);
-  if (direct.exists) {
+  if (direct.exists && inRoster(direct)) {
     return {
       status: isForm(direct) ? "form" : "exact",
       entityType: "species",
@@ -119,13 +124,13 @@ function resolveSpecies(dex: ModdedDex, query: string, normalized: string): Reso
   const alias = ALIASES[query.toLowerCase()];
   if (alias) {
     const s = dex.species.get(alias);
-    if (s.exists) {
+    if (s.exists && inRoster(s)) {
       return { status: "alias", entityType: "species", canonicalId: s.id, canonicalName: s.name };
     }
   }
   const entries = dex.species
     .all()
-    .filter((s) => !s.isMega && !s.battleOnly)
+    .filter((s) => !s.isMega && !s.battleOnly && s.num >= 1 && roster.has(toID(s.baseSpecies || s.name)))
     .map((s) => ({ id: s.id, name: s.name }));
   return fuzzyResult("species", fuzzyHits(entries, normalized, query));
 }

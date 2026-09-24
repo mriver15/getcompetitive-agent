@@ -53,6 +53,8 @@ async function main(): Promise<void> {
   check("resolve_entity returns candidates only on typo (CR-6)", (fuzzy.status === "fuzzy" || fuzzy.status === "ambiguous") && Array.isArray(fuzzy.candidates) && !fuzzy.canonicalId, fuzzy.status);
   const alias = JSON.parse(await resolveEntityTool.invoke({ query: "ape" }, toolConfig()));
   check("resolve_entity resolves alias", alias.status === "alias" && alias.canonicalName === "Annihilape", alias);
+  const cap = JSON.parse(await resolveEntityTool.invoke({ query: "Fidgit" }, toolConfig()));
+  check("resolve_entity rejects CAP fakemon", cap.status === "not_found", cap.status);
 
   // L-4..L-5: lookup_fact with kind/names/fields projection
   const facts = JSON.parse(await lookupFactTool.invoke({ kind: "species", names: ["Annihilape"], fields: ["types", "baseStats.spe"] }, toolConfig()));
@@ -73,6 +75,12 @@ async function main(): Promise<void> {
   // L-8 / CR-7: large results return a preview + resultRef, paged via expand_result.
   const all = JSON.parse(await searchDexTool.invoke({ entity: "species", limit: 5, sort: { field: "num", direction: "asc" } }, toolConfig()));
   check("search_dex returns resultRef for large results", typeof all.total === "number" && all.total > 5 && !!all.resultRef?.startsWith("search:"), all.total);
+
+  // Champions roster only: no CAP, no non-roster species.
+  const roster = JSON.parse(await searchDexTool.invoke({ entity: "species", limit: 100 }, toolConfig()));
+  const rosterTotal = roster.total as number;
+  const hasCap = Array.isArray(roster.preview) && roster.preview.some((r: { num?: number; name?: string }) => (r.num ?? 0) < 1);
+  check("search_dex universe is Champions roster only (no CAP)", rosterTotal < 300 && rosterTotal > 100 && !hasCap, rosterTotal);
   if (all.resultRef) {
     const page = JSON.parse(await expandResultTool.invoke({ resultRef: all.resultRef, offset: 0, limit: 3 }, toolConfig()));
     check("expand_result pages a stored result", Array.isArray(page.rows) && page.rows.length === 3, page.rows?.length);
