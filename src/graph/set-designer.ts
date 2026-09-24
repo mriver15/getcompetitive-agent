@@ -1,5 +1,5 @@
 /**
- * Set Designer graph (MVP Phase 4 core).
+ * Set Designer graph (spec §18, MVP Phase 4 core).
  *
  * A LangGraph StateGraph — resolve/search (deterministic) -> design (bounded,
  * responseFormat SetDraft) -> stage (validation) -> conditional repair edge ->
@@ -15,11 +15,12 @@ import { AIMessage, HumanMessage, SystemMessage } from "@langchain/core/messages
 import {
   type SetDraft,
   type StageSetResult,
+  type CanonicalSet,
   type ProposalArtifact,
 } from "../core/set/model.js";
 import { stageSet } from "../core/set/stage.js";
 import { resolveEntity } from "../core/dex/resolver.js";
-import { proposalRef, writeProposal } from "../core/set/store.js";
+import { buildProposalArtifact, writeProposal } from "../core/set/store.js";
 import { buildEvidence, writeEvidence } from "../core/evidence/evidence.js";
 import { getDex, statTable, resolveEvs } from "../core/dex/dex.js";
 
@@ -44,6 +45,7 @@ const DesignerState = Annotation.Root({
   regulation: Annotation<string>(lastValue("m-c")),
   draft: Annotation<SetDraft | undefined>(lastValue<SetDraft | undefined>(undefined)),
   stageResult: Annotation<StageSetResult | undefined>(lastValue<StageSetResult | undefined>(undefined)),
+  canonicalSet: Annotation<CanonicalSet | undefined>(lastValue<CanonicalSet | undefined>(undefined)),
   proposalRef: Annotation<string>(lastValue("")),
   evidenceRefs: Annotation<string[]>(lastValue<string[]>([])),
   repairCount: Annotation<number>(lastValue(0)),
@@ -52,9 +54,9 @@ const DesignerState = Annotation.Root({
 type DesignerStateT = typeof DesignerState.State;
 
 /** Extract a species name from a free-text goal ("build a bulky Annihilape..."). */
-export function extractSpecies(text: string, regulation: string): string {
-  const direct = resolveEntity(text, GEN);
-  if (direct.status === "resolved") return direct.resolved!.name;
+export function extractSpecies(text: string): string {
+  const direct = resolveEntity(text, { gen: GEN });
+  if (direct.canonicalName) return direct.canonicalName;
 
   const words = text.split(/[^A-Za-z'\-]+/).filter((w) => w.length > 2);
   const phrases: string[] = [];
@@ -63,18 +65,18 @@ export function extractSpecies(text: string, regulation: string): string {
     if (i + 1 < words.length) phrases.push(`${words[i]} ${words[i + 1]}`);
   }
   for (const p of phrases) {
-    const r = resolveEntity(p, GEN);
-    if (r.status === "resolved") return r.resolved!.name;
+    const r = resolveEntity(p, { gen: GEN });
+    if (r.canonicalName) return r.canonicalName;
   }
   return "";
 }
 
-async function resolveNode(state: DesignerStateT): Promise<Partial<DesignerStateT>> {
+async function resolveNode(state: DesignerStateT, defaultRegulation: string): Promise<Partial<DesignerStateT>> {
   const last = state.messages.at(-1);
   const text = last ? textOf(last) : "";
-  const species = state.species || (text ? extractSpecies(text, state.regulation) : "");
+  const species = state.species || (text ? extractSpecies(text) : "");
   const goal = state.goal || text;
-  return { species, goal };
+  return { species, goal, regulation: state.regulation || defaultRegulation };
 }
 
 function textOf(m: BaseMessage): string {
@@ -110,22 +112,26 @@ async function stageNode(state: DesignerStateT): Promise<Partial<DesignerStateT>
   if (!state.draft) {
     return {
       stageResult: {
+        ok: false,
         legal: false,
         warnings: [],
         errors: ["No draft produced by the designer."],
-        setHash: "",
-        canonicalSet: { species: state.species, moves: [], level: 50 },
-        regulation: state.regulation,
+        evidenceRefs: [],
       },
       repairCount: state.repairCount + 1,
     };
   }
-  const result = await stageSet(state.draft, { regulation: state.regulation });
-  return { stageResult: result, repairCount: result.legal ? state.repairCount : state.repairCount + 1 };
+  const outcome = await stageSet(state.draft, { regulation: state.regulation, goal: state.goal });
+  return {
+    stageResult: outcome.result,
+    canonicalSet: outcome.canonicalSet,
+    repairCount: outcome.result.legal ? state.repairCount : state.repairCount + 1,
+  };
 }
 
 async function benchmarkNode(state: DesignerStateT): Promise<Partial<DesignerStateT>> {
-  const canonical = state.stageResult!.canonicalSet;
+  const canonical = state.canonicalSet;
+  if (!canonical) return { evidenceRefs: [] };
   const dex = getDex(GEN);
   const sp = dex.species.get(canonical.forme ?? canonical.species);
   const evs = resolveEvs(canonical.evs, undefined);
@@ -133,7 +139,7 @@ async function benchmarkNode(state: DesignerStateT): Promise<Partial<DesignerSta
   const stats = statTable(GEN, sp.baseStats, canonical.level, ivs, evs, canonical.nature);
   const result = { species: sp.name, level: canonical.level, nature: canonical.nature, speed: stats.spe, stats };
 
-  const artifact = buildEvidence("ENGINE", "speed", { species: sp.name, level: canonical.level, nature: canonical.nature, evs }, result);
+  const artifact = buildEvidence("ENGINE", "calculate_speed", { species: sp.name, level: canonical.level, nature: canonical.nature, evs }, result);
   const store = getStore();
   if (store) await writeEvidence(store, currentThreadId(), artifact);
   return { evidenceRefs: [artifact.id] };
@@ -145,29 +151,25 @@ async function finalizeNode(state: DesignerStateT): Promise<Partial<DesignerStat
       messages: [new AIMessage("Could not resolve a species from the request; nothing staged.")],
     };
   }
-  if (!state.stageResult || !state.stageResult.legal) {
+  if (!state.stageResult || !state.stageResult.legal || !state.canonicalSet) {
     const errors = state.stageResult?.errors ?? ["no staged set"];
     return {
       messages: [new AIMessage(`Could not produce a legal set after ${state.repairCount} attempt(s). Errors: ${errors.join("; ")}`)],
     };
   }
-  const result = state.stageResult;
-  const artifact: ProposalArtifact = {
-    id: proposalRef(result.setHash),
-    canonicalSet: result.canonicalSet,
-    basis: "proposed",
-    origin: { type: "agent" },
-    rationale: state.draft?.rationale,
-    evidenceRefs: state.evidenceRefs,
-    validation: { legal: true, warnings: result.warnings, errors: result.errors, regulation: result.regulation },
-    hash: result.setHash,
-    createdAt: new Date().toISOString(),
-  };
+  const artifact: ProposalArtifact = buildProposalArtifact(
+    state.stageResult,
+    state.canonicalSet,
+    state.draft ?? { species: state.species, moves: [] },
+    { regulation: state.regulation, goal: state.goal, workflow: "set-designer" },
+  );
+  artifact.evidenceRefs = state.evidenceRefs;
   const store = getStore();
   if (store) await writeProposal(store, currentThreadId(), artifact);
   return {
     proposalRef: artifact.id,
-    messages: [new AIMessage(`Staged proposal ${artifact.id} (${artifact.canonicalSet.species}, legal in ${result.regulation}).`)],
+    evidenceRefs: artifact.evidenceRefs,
+    messages: [new AIMessage(`Staged proposal ${artifact.id} (${artifact.canonicalSet.species}, legal in ${state.regulation}).`)],
   };
 }
 
@@ -193,10 +195,12 @@ export function buildSetDesignerGraph(opts: {
   /** Default regulation when the task does not state one. */
   regulation?: string;
 }) {
+  const regulation = opts.regulation ?? "m-c";
   const design = (state: DesignerStateT) => designNode(state, opts.designModel);
+  const resolve = (state: DesignerStateT) => resolveNode(state, regulation);
 
   const graph = new StateGraph(DesignerState)
-    .addNode("resolve", resolveNode)
+    .addNode("resolve", resolve)
     .addNode("design", design)
     .addNode("stage", stageNode)
     .addNode("benchmark", benchmarkNode)

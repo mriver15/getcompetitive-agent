@@ -1,41 +1,73 @@
 /**
- * stage_set validation pipeline — canonicalize species/form/item/ability/nature/
- * moves, verify learnset + ability + spread + regulation, compute the canonical
- * hash. Deterministic; no model reasoning. Emits warnings/errors + legal.
+ * stage_set validation pipeline (spec §17) — canonicalize species/form/item/
+ * ability/nature/moves, verify learnset + ability + spread + regulation, and
+ * compute the canonical hash. Deterministic; no model reasoning.
  */
 import type { GenerationNum } from "../dex/dex.js";
 import { getDex, toID, learnableMoveIds, resolveEvs } from "../dex/dex.js";
 import { getRegulationSet } from "../dex/regulations.js";
 import { resolveEntity } from "../dex/resolver.js";
-import { canonicalHash, type CanonicalSet, type SetDraft, type StageSetResult } from "./model.js";
+import {
+  canonicalHash,
+  type CanonicalSet,
+  type EvidenceRef,
+  type ProposalRef,
+  type RegulationId,
+  type SetDraft,
+  type SetRef,
+  type SetSummary,
+  type StageSetResult,
+} from "./model.js";
+import { proposalRef } from "./store.js";
 
 const CHAMPIONS_LEVEL = 50;
 
 export interface StageOptions {
   gen?: GenerationNum;
   /** Default regulation when the draft omits one. */
-  regulation?: string;
+  regulation?: RegulationId;
+  goal?: string;
+  evidenceRefs?: EvidenceRef[];
+  parentSetRef?: SetRef | ProposalRef;
 }
 
-export async function stageSet(draft: SetDraft, opts: StageOptions = {}): Promise<StageSetResult> {
+/** Full pipeline outcome: the model-facing result plus the full canonical set for the artifact. */
+export interface StageOutcome {
+  result: StageSetResult;
+  canonicalSet: CanonicalSet;
+}
+
+function summary(canonicalSet: CanonicalSet): SetSummary {
+  return {
+    species: canonicalSet.species,
+    forme: canonicalSet.forme,
+    item: canonicalSet.item,
+    ability: canonicalSet.ability,
+    nature: canonicalSet.nature,
+    moves: [...canonicalSet.moves],
+    evs: canonicalSet.evs ? { ...canonicalSet.evs } : undefined,
+  };
+}
+
+export async function stageSet(draft: SetDraft, opts: StageOptions = {}): Promise<StageOutcome> {
   const gen = opts.gen ?? 9;
   const dex = getDex(gen);
   const warnings: string[] = [];
   const errors: string[] = [];
+  const regulationId: RegulationId = (draft.regulation ?? opts.regulation ?? "m-c").toLowerCase().replace(/[^a-z0-9]/g, "");
+
+  const unresolved: StageOutcome = {
+    result: { ok: false, legal: false, warnings, errors, evidenceRefs: opts.evidenceRefs ?? [] },
+    canonicalSet: { species: draft.species, moves: [], level: CHAMPIONS_LEVEL },
+  };
 
   // 1. Canonicalize species (and form).
-  const res = resolveEntity(draft.species, gen);
-  if (res.status !== "resolved" || !res.resolved) {
-    return {
-      legal: false,
-      warnings,
-      errors: [`Unresolved species "${draft.species}" (${res.status}).`],
-      setHash: "",
-      canonicalSet: emptyCanonical(draft.species),
-      regulation: draft.regulation ?? opts.regulation ?? "m-c",
-    };
+  const res = resolveEntity(draft.species, { gen });
+  if (!res.canonicalId || !res.canonicalName) {
+    unresolved.result.errors = [`Unresolved species "${draft.species}" (${res.status}).`];
+    return unresolved;
   }
-  const sp = dex.species.get(res.resolved.id);
+  const sp = dex.species.get(res.canonicalName);
   const baseSpecies = sp.baseSpecies && sp.baseSpecies !== sp.name ? sp.baseSpecies : sp.name;
   const forme = sp.forme || undefined;
 
@@ -71,17 +103,19 @@ export async function stageSet(draft: SetDraft, opts: StageOptions = {}): Promis
 
   // 5. Canonicalize moves + verify learnset.
   const moves: string[] = [];
-  if (draft.moves?.length) {
+  for (const raw of draft.moves ?? []) {
+    const m = dex.moves.get(raw);
+    if (!m.exists) {
+      errors.push(`Unknown move "${raw}".`);
+      continue;
+    }
+    moves.push(m.name);
+  }
+  if (moves.length > 0) {
     const learnable = await learnableMoveIds(dex, sp);
-    for (const raw of draft.moves) {
-      const m = dex.moves.get(raw);
-      if (!m.exists) {
-        errors.push(`Unknown move "${raw}".`);
-        continue;
-      }
-      moves.push(m.name);
-      if (!learnable.has(toID(m.name))) {
-        errors.push(`Move "${m.name}" is not in ${sp.name}'s learnset.`);
+    for (const name of moves) {
+      if (!learnable.has(toID(name))) {
+        errors.push(`Move "${name}" is not in ${sp.name}'s learnset.`);
       }
     }
   }
@@ -96,10 +130,9 @@ export async function stageSet(draft: SetDraft, opts: StageOptions = {}): Promis
   }
 
   // 7. Regulation roster legality (Species Clause is by National Dex number).
-  const regulation = (draft.regulation ?? opts.regulation ?? "m-c").toLowerCase().replace(/[^a-z0-9]/g, "");
-  const regSet = getRegulationSet(regulation);
+  const regSet = getRegulationSet(regulationId);
   if (!regSet) {
-    warnings.push(`Unknown regulation "${regulation}"; roster legality skipped.`);
+    warnings.push(`Unknown regulation "${regulationId}"; roster legality skipped.`);
   } else if (!regSet.eligibleSpecies.map(toID).includes(toID(baseSpecies))) {
     errors.push(`Species "${baseSpecies}" is not legal in Regulation Set ${regSet.id}.`);
   }
@@ -115,16 +148,20 @@ export async function stageSet(draft: SetDraft, opts: StageOptions = {}): Promis
     level: CHAMPIONS_LEVEL,
   };
 
-  return {
-    legal: errors.length === 0,
-    warnings,
-    errors,
-    setHash: errors.length === 0 ? canonicalHash(canonicalSet) : "",
-    canonicalSet,
-    regulation: regSet?.id ?? regulation,
-  };
-}
+  const ok = errors.length === 0;
+  const setHash = ok ? canonicalHash(canonicalSet) : undefined;
 
-function emptyCanonical(species: string): CanonicalSet {
-  return { species, moves: [], level: CHAMPIONS_LEVEL };
+  return {
+    result: {
+      ok,
+      legal: ok,
+      warnings,
+      errors,
+      setHash,
+      canonicalSet: ok ? summary(canonicalSet) : undefined,
+      proposalRef: ok ? proposalRef(setHash as string) : undefined,
+      evidenceRefs: opts.evidenceRefs ?? [],
+    },
+    canonicalSet,
+  };
 }

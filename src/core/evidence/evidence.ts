@@ -1,7 +1,7 @@
 /**
- * Evidence model — every empirical claim is backed by a content-addressed
- * EvidenceArtifact with a provenance class (CR-3). `read_evidence` returns a
- * compact summary, never the full result.
+ * Evidence model (spec §33) — every empirical claim is backed by a
+ * content-addressed EvidenceArtifact with a provenance class (CR-3).
+ * `read_evidence` returns a compact summary, never the full raw input.
  */
 import type { BaseStore } from "@langchain/langgraph";
 import { sha256 } from "../set/model.js";
@@ -11,28 +11,35 @@ export type Provenance = "DEX" | "META" | "ENGINE" | "INFERENCE";
 
 export interface EvidenceArtifact {
   id: string;
+  operation: string;
   provenance: Provenance;
-  kind: string;
   inputHash: string;
   artifactHash: string;
+  datasetVersion?: string;
+  sourceAsOf?: string;
+  sampleSize?: number;
   result: unknown;
   createdAt: string;
 }
 
 export function buildEvidence(
   provenance: Provenance,
-  kind: string,
+  operation: string,
   input: unknown,
   result: unknown,
+  opts: { datasetVersion?: string; sourceAsOf?: string; sampleSize?: number } = {},
 ): EvidenceArtifact {
   const inputHash = sha256(JSON.stringify(input));
   const artifactHash = sha256(JSON.stringify({ input, result }));
   return {
     id: evidenceRef(inputHash),
+    operation,
     provenance,
-    kind,
     inputHash,
     artifactHash,
+    datasetVersion: opts.datasetVersion,
+    sourceAsOf: opts.sourceAsOf,
+    sampleSize: opts.sampleSize,
     result,
     createdAt: new Date().toISOString(),
   };
@@ -56,13 +63,15 @@ export async function readEvidenceArtifact(
   return item ? (item.value as unknown as EvidenceArtifact) : null;
 }
 
-/** Compact summary — provenance + kind + the result, without the raw input. */
+/** Compact summary — provenance + operation + result, without the raw input. */
 export function summarizeEvidence(a: EvidenceArtifact): Record<string, unknown> {
   return {
-    ref: a.id,
+    evidenceRef: a.id,
+    operation: a.operation,
     provenance: a.provenance,
-    kind: a.kind,
+    datasetVersion: a.datasetVersion,
+    sourceAsOf: a.sourceAsOf,
+    sampleSize: a.sampleSize,
     result: a.result,
-    createdAt: a.createdAt,
   };
 }

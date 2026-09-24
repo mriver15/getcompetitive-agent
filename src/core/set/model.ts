@@ -1,6 +1,7 @@
 /**
- * Set lifecycle data models: the typed draft a designer emits, the canonical
- * set it validates into, and the proposal/saved-set artifacts it persists.
+ * Set lifecycle data models — typed contracts per champions-deepagent-dex-set-
+ * lifecycle-spec-v0.4: the typed draft a designer emits, the canonical set it
+ * validates into, and the proposal / saved-set / evidence artifacts it persists.
  */
 import { createHash } from "node:crypto";
 import { z } from "zod";
@@ -10,16 +11,27 @@ export type Evs = Record<string, number>;
 /** A stat spread on the Champions 0-32-per-stat / 66-total scale. */
 export type ChampionsPoints = Record<string, number>;
 
+export type RegulationId = string;
+export type CapabilityTag = string;
+
+/** Opaque, stable artifact references (plain strings). */
+export type ProposalRef = string;
+export type SetRef = string;
+export type EvidenceRef = string;
+export type SearchResultRef = string;
+export type InferenceRef = string;
+
 /**
- * The typed draft the Set Designer emits via `responseFormat`. Free text is
- * never re-parsed into this shape.
+ * The typed draft the Set Designer emits via `responseFormat`. `moves` is
+ * required; `rationale` is a list of concise user-facing reasons (never hidden
+ * chain-of-thought).
  */
 export const SetDraftSchema = z.object({
   species: z.string().describe("The species (and optional form) to build, e.g. 'Annihilape'."),
   item: z.string().optional().describe("Held item."),
   ability: z.string().optional().describe("Ability."),
   nature: z.string().optional().describe("Nature."),
-  moves: z.array(z.string()).max(4).optional().describe("Up to four moves."),
+  moves: z.array(z.string()).max(4).describe("Up to four moves."),
   evs: z.record(z.string(), z.number()).optional().describe("0-252 EVs per stat."),
   championsPoints: z
     .record(z.string(), z.number())
@@ -28,7 +40,7 @@ export const SetDraftSchema = z.object({
   role: z.string().optional().describe("The team role this set fills."),
   intendedAnswers: z.array(z.string()).optional().describe("Threats this set is built to answer."),
   intendedPartners: z.array(z.string()).optional().describe("Team members this set partners with."),
-  rationale: z.string().optional().describe("Why this build (kept as rationale, never hidden CoT)."),
+  rationale: z.array(z.string()).optional().describe("Concise user-facing reasons for the build."),
   regulation: z.string().optional().describe("Regulation set id, e.g. 'm-c'."),
 });
 export type SetDraft = z.infer<typeof SetDraftSchema>;
@@ -47,37 +59,29 @@ export interface CanonicalSet {
   level: number;
 }
 
+/** Compact set summary returned to the model by stage_set (full set lives in the artifact). */
+export interface SetSummary {
+  species: string;
+  forme?: string;
+  item?: string;
+  ability?: string;
+  nature?: string;
+  moves: string[];
+  evs?: Evs;
+}
+
+export type ValidationWarning = string;
+export type ValidationError = string;
+
 export interface StageSetResult {
+  ok: boolean;
+  proposalRef?: ProposalRef;
+  canonicalSet?: SetSummary;
   legal: boolean;
-  warnings: string[];
-  errors: string[];
-  setHash: string;
-  canonicalSet: CanonicalSet;
-  regulation: string;
-}
-
-/** Opaque, stable reference to a staged proposal. */
-export interface ProposalRef {
-  ref: string;
-  kind: "proposal";
-}
-
-/** Opaque, stable reference to a saved set. */
-export interface SetRef {
-  ref: string;
-  kind: "set";
-}
-
-/** Opaque, stable reference to a benchmark evidence artifact. */
-export interface EvidenceRef {
-  ref: string;
-  kind: "evidence";
-}
-
-/** Opaque, stable reference to a large, paged search result. */
-export interface SearchResultRef {
-  ref: string;
-  kind: "search_result";
+  warnings: ValidationWarning[];
+  errors: ValidationError[];
+  setHash?: string;
+  evidenceRefs: EvidenceRef[];
 }
 
 export function sha256(input: string): string {
@@ -92,7 +96,8 @@ function sortKeys(record: Record<string, number>): Record<string, number> {
 
 /**
  * Canonical content hash — the dedup key (S-9). Fields: species/form, item,
- * ability, nature, moves, IVs, EVs, level. Identical sets hash identically.
+ * ability, nature, moves, IVs, EVs, level. Identical sets hash identically;
+ * rationale/tags/labels/createdAt are excluded.
  */
 export function canonicalHash(set: CanonicalSet): string {
   const canonical = {
@@ -110,26 +115,47 @@ export function canonicalHash(set: CanonicalSet): string {
 }
 
 export interface ProposalArtifact {
-  id: string;
+  id: ProposalRef;
   canonicalSet: CanonicalSet;
   basis: "proposed";
-  origin: { type: "agent" };
-  rationale?: string;
-  evidenceRefs: string[];
-  parentRef?: string;
-  validation: { legal: boolean; warnings: string[]; errors: string[]; regulation: string };
+  origin: {
+    type: "agent";
+    workflow: "set-designer" | "team-doctor" | "build-around" | "matchup-prep" | string;
+  };
+  regulation?: RegulationId;
+  goal?: string;
+  rationale: string[];
+  intendedAnswers?: string[];
+  evidenceRefs: EvidenceRef[];
+  parentRef?: SetRef | ProposalRef;
+  validation: {
+    legal: boolean;
+    datasetVersion: string;
+    checkedAt: string;
+  };
   hash: string;
   createdAt: string;
 }
 
 export interface SavedSet {
-  id: string;
-  canonicalSet: CanonicalSet;
+  id: SetRef;
+  set: CanonicalSet;
   basis: "proposed" | "inferred";
-  origin: { type: "agent" | "user"; sourceRef?: string };
-  parentSetRef?: string;
+  origin: {
+    type: "agent" | "user" | "battle";
+    workflow?: string;
+  };
+  regulation?: RegulationId;
+  rationale: string[];
+  intendedAnswers?: string[];
+  evidenceRefs: EvidenceRef[];
+  parentSetRef?: SetRef;
   tags: string[];
+  validation: {
+    legal: boolean;
+    datasetVersion: string;
+    checkedAt: string;
+  };
   hash: string;
-  regulation: string;
-  savedAt: string;
+  createdAt: string;
 }

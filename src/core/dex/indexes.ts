@@ -7,7 +7,7 @@
 import type { Species } from "@pkmn/dex";
 import { getDex, toID, learnableMoveIds, type GenerationNum } from "./dex.js";
 import { REGULATION_SETS } from "./regulations.js";
-import { buildCapabilityIndex, type CapabilityIndex } from "./capabilities.js";
+import { buildCapabilityIndex, type CapabilityIndex } from "./taxonomy.js";
 
 export const DATASET_VERSION = "showdown-gen9@2026-09";
 export const REGULATION_VERSION = REGULATION_SETS.map((s) => `${s.id}=${s.sourceAsOf}`).join(";");

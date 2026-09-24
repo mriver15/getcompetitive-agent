@@ -1,9 +1,9 @@
 /**
- * Runtime context + custom state schema.
+ * Runtime context + supervisor state (spec §31).
  *
  * Context is per-run, immutable, and namespaces the durable Set Library (user
- * id). State holds references only; private fields are prefixed `_` and are
- * excluded from the result.
+ * id). State stores references only — never large payloads, which live in the
+ * artifact store.
  */
 import { StateSchema } from "@langchain/langgraph";
 import { z } from "zod";
@@ -14,7 +14,12 @@ export const contextSchema = z.object({
 });
 
 export const championsStateSchema = new StateSchema({
-  regulation: z.string().optional().describe("Regulation resolved once per run."),
-  _proposalRefs: z.array(z.string()).optional().describe("Proposal refs staged this run (private)."),
-  _evidenceRefs: z.array(z.string()).optional().describe("Evidence refs produced this run (private)."),
+  activeRegulation: z.string().optional().describe("Regulation resolved once per run."),
+  activeTeamRef: z.string().optional().describe("Reference to the active team artifact."),
+  activeOpponentRef: z.string().optional().describe("Reference to the active opponent team artifact."),
+  activeSearchRef: z.string().optional().describe("Reference to the active large search artifact."),
+  activeDossierRef: z.string().optional().describe("Reference to the active matchup dossier artifact."),
+  pendingProposalRef: z.string().optional().describe("The proposal awaiting the user's save decision."),
+  activeSetRef: z.string().optional().describe("The most recently saved SetRef."),
+  evidenceIndex: z.record(z.string(), z.string()).optional().describe("Evidence refs by operation."),
 });

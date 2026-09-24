@@ -40,7 +40,7 @@ const bulkyAnnihilape = {
   championsPoints: { hp: 32, atk: 32, spd: 2 },
   role: "bulky offense",
   intendedAnswers: ["Incineroar"],
-  rationale: "Bulky Annihilape that trades into Intimidate users and snowballs Rage Fist.",
+  rationale: ["Trades into Intimidate users and snowballs Rage Fist."],
 };
 
 async function main(): Promise<void> {
@@ -48,26 +48,30 @@ async function main(): Promise<void> {
 
   // L-1..L-3: resolve_entity
   const resolved = JSON.parse(await resolveEntityTool.invoke({ query: "Annihilape" }, toolConfig()));
-  check("resolve_entity resolves Annihilape", resolved.status === "resolved" && resolved.resolved?.name === "Annihilape", resolved);
+  check("resolve_entity resolves Annihilape exactly", resolved.status === "exact" && resolved.canonicalName === "Annihilape", resolved);
   const fuzzy = JSON.parse(await resolveEntityTool.invoke({ query: "Annihliape" }, toolConfig()));
-  check("resolve_entity returns candidates only on typo (CR-6)", fuzzy.status === "fuzzy" && Array.isArray(fuzzy.candidates) && !fuzzy.resolved, fuzzy.status);
+  check("resolve_entity returns candidates only on typo (CR-6)", (fuzzy.status === "fuzzy" || fuzzy.status === "ambiguous") && Array.isArray(fuzzy.candidates) && !fuzzy.canonicalId, fuzzy.status);
+  const alias = JSON.parse(await resolveEntityTool.invoke({ query: "ape" }, toolConfig()));
+  check("resolve_entity resolves alias", alias.status === "alias" && alias.canonicalName === "Annihilape", alias);
 
-  // L-4..L-5: lookup_fact with fields projection
-  const facts = JSON.parse(await lookupFactTool.invoke({ entity: "Annihilape", fields: ["types", "baseStats", "abilities"] }, toolConfig()));
+  // L-4..L-5: lookup_fact with kind/names/fields projection
+  const facts = JSON.parse(await lookupFactTool.invoke({ kind: "species", names: ["Annihilape"], fields: ["types", "baseStats.spe"] }, toolConfig()));
   const ap = facts.results?.[0];
-  check("lookup_fact projects only requested fields + identity", ap?.name === "Annihilape" && ap?.types && ap?.baseStats && ap?.abilities && ap?.moves === undefined, ap);
+  check("lookup_fact projects only requested fields + identity", ap?.name === "Annihilape" && Array.isArray(ap?.types) && typeof ap?.["baseStats.spe"] === "number" && ap?.baseStats === undefined && ap?.abilities === undefined, ap);
+  const moves = JSON.parse(await lookupFactTool.invoke({ kind: "move", names: ["Rage Fist"], fields: ["type", "basePower"] }, toolConfig()));
+  check("lookup_fact supports non-species kinds", moves.results?.[0]?.name === "Rage Fist" && typeof moves.results?.[0]?.basePower === "number", moves.results?.[0]);
 
   // L-6..L-9: search_dex typed constraints
-  const bulky = JSON.parse(await searchDexTool.invoke({ minStats: { hp: 100, def: 80 }, capabilities: ["priority"], regulation: "m-b" }, toolConfig()));
+  const bulky = JSON.parse(await searchDexTool.invoke({ entity: "species", filters: { minBaseStats: { hp: 100, def: 80 }, capabilitiesAny: ["priority"] }, regulation: "m-b", fields: ["types"] }, toolConfig()));
   check("search_dex intersects stat + capability + regulation", typeof bulky.total === "number" && Array.isArray(bulky.preview), bulky.total);
 
-  // L-10: capability filter finds Annihilape (Rage Fist is not tagged, but Drain Punch/Bulk Up? use 'setup'/'recovery' via Bulk Up/Drain Punch)
-  const setup = JSON.parse(await searchDexTool.invoke({ learns: ["Rage Fist"], regulation: "m-b" }, toolConfig()));
+  // L-10: capability/learns filters reach Annihilape
+  const setup = JSON.parse(await searchDexTool.invoke({ entity: "species", filters: { learnsAll: ["Rage Fist"] }, regulation: "m-b" }, toolConfig()));
   const hasApe = Array.isArray(setup.preview) && setup.preview.some((r: { name: string }) => r.name === "Annihilape");
-  check("search_dex learns filter reaches Annihilape", hasApe, setup.total);
+  check("search_dex learnsAll filter reaches Annihilape", hasApe, setup.total);
 
   // L-8 / CR-7: large results return a preview + resultRef, paged via expand_result.
-  const all = JSON.parse(await searchDexTool.invoke({ limit: 5, sort: "num" }, toolConfig()));
+  const all = JSON.parse(await searchDexTool.invoke({ entity: "species", limit: 5, sort: { field: "num", direction: "asc" } }, toolConfig()));
   check("search_dex returns resultRef for large results", typeof all.total === "number" && all.total > 5 && !!all.resultRef?.startsWith("search:"), all.total);
   if (all.resultRef) {
     const page = JSON.parse(await expandResultTool.invoke({ resultRef: all.resultRef, offset: 0, limit: 3 }, toolConfig()));
@@ -77,17 +81,17 @@ async function main(): Promise<void> {
   console.log("== Set lifecycle ==");
 
   // S-1..S-4: stage_set
-  const staged = JSON.parse(await stageSetTool.invoke({ draft: bulkyAnnihilape, regulation: "m-b" }, toolConfig()));
-  check("stage_set validates a legal bulky Annihilape", staged.legal === true && staged.proposalRef?.startsWith("proposal:"), staged);
+  const staged = JSON.parse(await stageSetTool.invoke({ draft: bulkyAnnihilape, regulation: "m-b", goal: "bulky Annihilape for this team" }, toolConfig()));
+  check("stage_set validates a legal bulky Annihilape", staged.ok === true && staged.proposalRef?.startsWith("proposal:"), staged);
 
-  // Illegal draft (move not in learnset, bad ability) must be rejected.
+  // Illegal draft (bad ability + move not in learnset) must be rejected.
   const illegal = JSON.parse(
     await stageSetTool.invoke(
       { draft: { ...bulkyAnnihilape, ability: "Levitate", moves: ["Hydro Pump"] }, regulation: "m-b" },
       toolConfig(),
     ),
   );
-  check("stage_set rejects illegal ability + move", illegal.legal === false && illegal.errors.length >= 2, illegal.errors);
+  check("stage_set rejects illegal ability + move", illegal.ok === false && illegal.errors.length >= 2, illegal.errors);
 
   // S-7..S-9: save_set + dedup
   const saved1 = JSON.parse(await saveSetTool.invoke({ sourceRef: staged.proposalRef }, toolConfig()));
@@ -99,9 +103,9 @@ async function main(): Promise<void> {
   const refused = JSON.parse(await saveSetTool.invoke({ sourceRef: "set:deadbeef" }, toolConfig()));
   check("save_set refuses a non-staged sourceRef", typeof refused.error === "string", refused);
 
-  // S-12: search_saved_sets
-  const found = JSON.parse(await searchSavedSetsTool.invoke({ species: "Annihilape", basis: "proposed" }, toolConfig()));
-  check("search_saved_sets finds the saved set", found.count === 1 && found.sets?.[0]?.canonicalSet?.species === "Annihilape", found.count);
+  // S-12: search_saved_sets (array filters)
+  const found = JSON.parse(await searchSavedSetsTool.invoke({ species: ["Annihilape"], basis: ["proposed"] }, toolConfig()));
+  check("search_saved_sets finds the saved set", found.count === 1 && found.sets?.[0]?.set?.species === "Annihilape", found.count);
 
   console.log("== Evidence / benchmarks ==");
 
@@ -121,8 +125,8 @@ async function main(): Promise<void> {
   const spd = JSON.parse(await calculateSpeedTool.invoke({ species: "Annihilape", nature: "Adamant", championsPoints: { hp: 32, atk: 32, spe: 2 } }, toolConfig()));
   check("calculate_speed returns final speed + evidence", typeof spd.result?.speed === "number" && !!spd.evidenceRef, spd.result?.speed);
 
-  const evRead = JSON.parse(await readEvidenceTool.invoke({ ref: dmg.evidenceRef }, toolConfig()));
-  check("read_evidence returns compact summary", evRead.kind === "damage" && evRead.result !== undefined, evRead.kind);
+  const evRead = JSON.parse(await readEvidenceTool.invoke({ evidenceRef: dmg.evidenceRef }, toolConfig()));
+  check("read_evidence returns compact summary", evRead.operation === "calculate_damage" && evRead.result !== undefined, evRead.operation);
 
   console.log("== Set Designer graph (Phase 4) ==");
 
@@ -145,7 +149,7 @@ async function main(): Promise<void> {
     invoke: async () => {
       attempt++;
       return attempt === 1
-        ? { ...bulkyAnnihilape, ability: "Levitate", moves: ["Shadow Ball"] }
+        ? { ...bulkyAnnihilape, ability: "Levitate", moves: ["Hydro Pump"] }
         : bulkyAnnihilape;
     },
   };

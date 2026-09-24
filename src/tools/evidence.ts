@@ -1,8 +1,8 @@
 /**
- * Evidence + benchmark tools (MVP Phase 4): calculate_damage, calculate_speed,
- * optimize_spread, read_evidence. Every benchmark emits a content-addressed
- * EvidenceArtifact (provenance ENGINE) and returns an EvidenceRef; read_evidence
- * returns a compact summary, never the raw input.
+ * Evidence + benchmark tools (spec §20, §33): calculate_damage,
+ * calculate_speed, optimize_spread, read_evidence. Every benchmark emits a
+ * content-addressed EvidenceArtifact (provenance ENGINE) and returns an
+ * EvidenceRef; read_evidence returns a compact summary, never the raw input.
  */
 import { tool } from "langchain";
 import { z } from "zod";
@@ -34,10 +34,10 @@ export const calculateDamageTool = tool(
   ) => {
     try {
       const result = damageResult(GEN, args.attacker as unknown as SetInput, args.defender as unknown as SetInput, args.move, args.field as never);
-      const evidence = buildEvidence("ENGINE", "damage", { attacker: args.attacker, defender: args.defender, move: args.move }, result);
+      const evidence = buildEvidence("ENGINE", "calculate_damage", { attacker: args.attacker, defender: args.defender, move: args.move }, result);
       const store = getStore(runtime);
       if (store) await writeEvidence(store, getThreadId(runtime), evidence);
-      return JSON.stringify({ evidenceRef: evidence.id, ...summarizeEvidence(evidence) });
+      return JSON.stringify({ ...summarizeEvidence(evidence) });
     } catch (e) {
       return JSON.stringify({ error: (e as Error).message });
     }
@@ -68,20 +68,20 @@ export const calculateSpeedTool = tool(
   ) => {
     try {
       const dex = getDex(GEN);
-      const res = resolveEntity(args.species, GEN);
-      if (res.status !== "resolved" || !res.resolved) {
+      const res = resolveEntity(args.species, { gen: GEN });
+      if (!res.canonicalName) {
         return JSON.stringify({ error: `Unresolved species "${args.species}" (${res.status}).` });
       }
-      const sp = dex.species.get(res.resolved.id);
+      const sp = dex.species.get(res.canonicalName);
       const level = args.level ?? 50;
       const evs = resolveEvs(args.evs, args.championsPoints);
       const ivs: Record<string, number> = { hp: 31, atk: 31, def: 31, spa: 31, spd: 31, spe: 31 };
       const stats = statTable(GEN, sp.baseStats, level, ivs, evs, args.nature);
       const result = { species: sp.name, level, nature: args.nature ?? "Serious", speed: stats.spe, stats };
-      const evidence = buildEvidence("ENGINE", "speed", { species: sp.name, level, nature: args.nature, evs }, result);
+      const evidence = buildEvidence("ENGINE", "calculate_speed", { species: sp.name, level, nature: args.nature, evs }, result);
       const store = getStore(runtime);
       if (store) await writeEvidence(store, getThreadId(runtime), evidence);
-      return JSON.stringify({ evidenceRef: evidence.id, ...summarizeEvidence(evidence) });
+      return JSON.stringify({ ...summarizeEvidence(evidence) });
     } catch (e) {
       return JSON.stringify({ error: (e as Error).message });
     }
@@ -112,16 +112,15 @@ export const optimizeSpreadTool = tool(
   ) => {
     try {
       const dex = getDex(GEN);
-      const res = resolveEntity(args.species, GEN);
-      if (res.status !== "resolved" || !res.resolved) {
+      const res = resolveEntity(args.species, { gen: GEN });
+      if (!res.canonicalName) {
         return JSON.stringify({ error: `Unresolved species "${args.species}" (${res.status}).` });
       }
-      const sp = dex.species.get(res.resolved.id);
+      const sp = dex.species.get(res.canonicalName);
       const level = args.level ?? 50;
       const priority = args.priority.length > 0 ? args.priority.map((s) => s.toLowerCase()) : ["spe"];
-      // Greedy allocation: fill the first priority stat to 252, then the next.
       const evs: Record<string, number> = {};
-      let budget = 508; // 510 usable, kept even so it splits into 4s
+      let budget = 508;
       for (const stat of priority) {
         if (budget <= 0) break;
         if (!STATS.includes(stat as StatID)) continue;
@@ -135,7 +134,7 @@ export const optimizeSpreadTool = tool(
       const evidence = buildEvidence("ENGINE", "optimize_spread", { species: sp.name, priority, level }, result);
       const store = getStore(runtime);
       if (store) await writeEvidence(store, getThreadId(runtime), evidence);
-      return JSON.stringify({ evidenceRef: evidence.id, ...summarizeEvidence(evidence) });
+      return JSON.stringify({ ...summarizeEvidence(evidence) });
     } catch (e) {
       return JSON.stringify({ error: (e as Error).message });
     }
@@ -162,19 +161,19 @@ function evsToPoints(evs: Record<string, number>): Record<string, number> {
 }
 
 export const readEvidenceTool = tool(
-  async ({ ref }: { ref: string }, runtime) => {
+  async ({ evidenceRef }: { evidenceRef: string }, runtime) => {
     const store = getStore(runtime);
     if (!store) return JSON.stringify({ error: "No store available." });
-    const artifact = await readEvidenceArtifact(store, getThreadId(runtime), ref);
-    if (!artifact) return JSON.stringify({ error: `No evidence found for ref "${ref}".` });
+    const artifact = await readEvidenceArtifact(store, getThreadId(runtime), evidenceRef);
+    if (!artifact) return JSON.stringify({ error: `No evidence found for ref "${evidenceRef}".` });
     return JSON.stringify(summarizeEvidence(artifact));
   },
   {
     name: "read_evidence",
     description:
-      "Read the compact summary of a benchmark evidence artifact by its evidenceRef. Returns provenance, kind, and result — never the raw input.",
+      "Read the compact summary of a benchmark evidence artifact by its evidenceRef. Returns provenance, operation, and result — never the raw input.",
     schema: z.object({
-      ref: z.string().describe("The evidenceRef from a benchmark tool."),
+      evidenceRef: z.string().describe("The evidenceRef from a benchmark tool."),
     }),
   },
 );

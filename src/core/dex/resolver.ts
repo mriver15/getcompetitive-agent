@@ -1,55 +1,46 @@
 /**
- * resolve_entity — canonical id -> exact normalized name -> alias -> base/form
- * map -> fuzzy candidates. On `ambiguous` / `fuzzy` the result carries
- * candidates only (CR-6: no silent pick).
+ * Deterministic entity resolution (spec §6).
+ *
+ * Chain: canonical ID -> exact normalized name -> known alias -> base/form
+ * mapping -> fuzzy candidates. On `fuzzy` / `ambiguous` the result carries
+ * candidates only — never a silent selection (CR-6).
  */
-import type { ModdedDex, Species } from "@pkmn/dex";
+import type { ModdedDex } from "@pkmn/dex";
 import { getDex, toID, type GenerationNum } from "./dex.js";
-import { DATASET_VERSION } from "./indexes.js";
 
-export type ResolutionStatus = "resolved" | "ambiguous" | "fuzzy" | "not_found";
+export type EntityType = "species" | "move" | "item" | "ability" | "nature";
+export type ResolutionStatus = "exact" | "alias" | "form" | "fuzzy" | "ambiguous" | "not_found";
 
 export interface ResolutionCandidate {
   id: string;
   name: string;
-  baseSpecies?: string;
-  forme?: string;
-  types: string[];
+  score?: number;
 }
 
 export interface ResolutionResult {
   status: ResolutionStatus;
-  query: string;
-  datasetVersion: string;
-  resolved?: ResolutionCandidate;
-  /** Base/form map: the resolved species plus its alternate forms. */
-  forms?: Array<{ id: string; name: string }>;
-  /** Present (and authoritative) when status is `ambiguous` or `fuzzy`. */
+  entityType?: EntityType;
+  canonicalId?: string;
+  canonicalName?: string;
   candidates?: ResolutionCandidate[];
 }
 
-/** Curated competitive aliases; keyed by lowercase alias. */
+/** Curated competitive species aliases; keyed by lowercase alias. */
 const ALIASES: Record<string, string> = {
   "ape": "Annihilape",
   "lando": "Landorus",
+  "lando-t": "Landorus-Therian",
   "ttar": "Tyranitar",
   "mence": "Salamence",
   "koko": "Tapu Koko",
   "fini": "Tapu Fini",
   "lele": "Tapu Lele",
   "bulu": "Tapu Bulu",
-  "geeta": "Gholdengo",
+  "goldengo": "Gholdengo",
+  "cress": "Cresselia",
+  "dozo": "Dondozo",
+  "pult": "Dragapult",
 };
-
-function candidate(s: Species): ResolutionCandidate {
-  return {
-    id: s.id,
-    name: s.name,
-    baseSpecies: s.baseSpecies && s.baseSpecies !== s.name ? s.baseSpecies : undefined,
-    forme: s.forme || undefined,
-    types: [...s.types],
-  };
-}
 
 /** Classic Levenshtein edit distance between two lowercase strings. */
 function levenshtein(a: string, b: string): number {
@@ -68,73 +59,112 @@ function levenshtein(a: string, b: string): number {
   return curr[b.length];
 }
 
-/** All forms of a species (itself included). */
-function formsOf(dex: ModdedDex, s: Species): Array<{ id: string; name: string }> {
-  const out: Array<{ id: string; name: string }> = [{ id: s.id, name: s.name }];
-  for (const name of s.otherFormes ?? []) {
-    const f = dex.species.get(name);
-    if (f.exists) out.push({ id: f.id, name: f.name });
-  }
-  return out;
+interface FuzzyHit {
+  id: string;
+  name: string;
+  score: number;
 }
 
-export function resolveEntity(query: string, gen: GenerationNum = 9): ResolutionResult {
-  const dex = getDex(gen);
-  const trimmed = query.trim();
-  const normalized = toID(trimmed);
-
-  // 1. canonical id / exact normalized name
-  let s = dex.species.get(trimmed);
-  if (!s.exists && normalized) s = dex.species.get(normalized);
-
-  // 2. alias
-  if (!s.exists) {
-    const alias = ALIASES[trimmed.toLowerCase()];
-    if (alias) s = dex.species.get(alias);
-  }
-
-  if (s.exists) {
-    return {
-      status: "resolved",
-      query: trimmed,
-      datasetVersion: DATASET_VERSION,
-      resolved: candidate(s),
-      forms: formsOf(dex, s),
-    };
-  }
-
-  // 3. fuzzy candidates (substring + edit distance), candidates only.
-  const q = trimmed.toLowerCase();
-  const matches: Array<{ s: Species; score: number }> = [];
-  for (const sp of dex.species.all()) {
-    if (sp.isMega || sp.battleOnly) continue;
-    const id = sp.id;
-    const name = sp.name.toLowerCase();
-    if (!normalized) continue;
+function fuzzyHits(
+  entries: Array<{ id: string; name: string }>,
+  normalized: string,
+  query: string,
+): FuzzyHit[] {
+  const hits: FuzzyHit[] = [];
+  for (const e of entries) {
+    const id = e.id;
+    const name = e.name.toLowerCase();
     let score = -1;
     if (id === normalized) score = 4;
     else if (id.startsWith(normalized)) score = 3;
     else if (id.includes(normalized)) score = 2;
-    else if (name.startsWith(q)) score = 2;
-    else if (name.includes(q)) score = 1;
+    else if (name.startsWith(query)) score = 2;
+    else if (name.includes(query)) score = 1;
     else {
-      const d = Math.min(levenshtein(id, normalized), levenshtein(name, q));
+      const d = Math.min(levenshtein(id, normalized), levenshtein(name, query));
       const threshold = normalized.length <= 4 ? 1 : normalized.length <= 8 ? 2 : 3;
       if (d <= threshold) score = 1 - d * 0.25;
     }
-    if (score >= 0) matches.push({ s: sp, score });
+    if (score >= 0) hits.push({ id, name: e.name, score });
   }
-  matches.sort((a, b) => b.score - a.score || a.s.id.localeCompare(b.s.id));
-  const top = matches.slice(0, 10);
+  hits.sort((a, b) => b.score - a.score || a.id.localeCompare(b.id));
+  return hits;
+}
 
-  if (top.length === 0) {
-    return { status: "not_found", query: trimmed, datasetVersion: DATASET_VERSION };
-  }
-
+function fuzzyResult(entityType: EntityType, hits: FuzzyHit[]): ResolutionResult {
+  if (hits.length === 0) return { status: "not_found", entityType, candidates: [] };
+  const top = hits[0].score;
+  const tied = hits.filter((h) => h.score === top);
   return {
-    status: "fuzzy",
-    query: trimmed,
-    datasetVersion: DATASET_VERSION,
-    candidates: top.map((m) => candidate(m.s)),
+    status: tied.length > 1 ? "ambiguous" : "fuzzy",
+    entityType,
+    candidates: hits.slice(0, 10).map((h) => ({ id: h.id, name: h.name, score: h.score })),
   };
+}
+
+function isForm(s: { forme?: string; baseSpecies?: string; name: string }): boolean {
+  return !!s.forme || (!!s.baseSpecies && s.baseSpecies !== s.name);
+}
+
+function resolveSpecies(dex: ModdedDex, query: string, normalized: string): ResolutionResult {
+  const direct = dex.species.get(query);
+  if (direct.exists) {
+    return {
+      status: isForm(direct) ? "form" : "exact",
+      entityType: "species",
+      canonicalId: direct.id,
+      canonicalName: direct.name,
+    };
+  }
+  const alias = ALIASES[query.toLowerCase()];
+  if (alias) {
+    const s = dex.species.get(alias);
+    if (s.exists) {
+      return { status: "alias", entityType: "species", canonicalId: s.id, canonicalName: s.name };
+    }
+  }
+  const entries = dex.species
+    .all()
+    .filter((s) => !s.isMega && !s.battleOnly)
+    .map((s) => ({ id: s.id, name: s.name }));
+  return fuzzyResult("species", fuzzyHits(entries, normalized, query));
+}
+
+function resolveByTable(
+  entityType: Exclude<EntityType, "species">,
+  get: (q: string) => { exists: boolean; id: string; name: string },
+  all: () => readonly { id: string; name: string }[],
+  query: string,
+  normalized: string,
+): ResolutionResult {
+  const direct = get(query);
+  if (direct.exists) {
+    return { status: "exact", entityType, canonicalId: direct.id, canonicalName: direct.name };
+  }
+  return fuzzyResult(entityType, fuzzyHits(all().map((e) => ({ id: e.id, name: e.name })), normalized, query));
+}
+
+export interface ResolveOptions {
+  kind?: EntityType;
+  gen?: GenerationNum;
+}
+
+export function resolveEntity(query: string, opts: ResolveOptions = {}): ResolutionResult {
+  const gen = opts.gen ?? 9;
+  const dex = getDex(gen);
+  const trimmed = query.trim();
+  const normalized = toID(trimmed);
+
+  switch (opts.kind ?? "species") {
+    case "species":
+      return resolveSpecies(dex, trimmed, normalized);
+    case "move":
+      return resolveByTable("move", (q) => dex.moves.get(q), () => dex.moves.all(), trimmed, normalized);
+    case "item":
+      return resolveByTable("item", (q) => dex.items.get(q), () => dex.items.all(), trimmed, normalized);
+    case "ability":
+      return resolveByTable("ability", (q) => dex.abilities.get(q), () => dex.abilities.all(), trimmed, normalized);
+    case "nature":
+      return resolveByTable("nature", (q) => dex.natures.get(q), () => dex.natures.all(), trimmed, normalized);
+  }
 }
