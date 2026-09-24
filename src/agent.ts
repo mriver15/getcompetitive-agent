@@ -25,6 +25,7 @@ import {
   readEvidenceTool,
 } from "./tools/evidence.js";
 import { doctrineGuardMiddleware } from "./middleware/doctrine-guard.js";
+import { webSearchTool, THREAT_SOURCES } from "./tools/web.js";
 import { contextSchema, championsStateSchema } from "./state.js";
 import { SYSTEM_PROMPT } from "./system-prompt.js";
 import { buildSetDesignerGraph, type DesignModel } from "./graph/set-designer.js";
@@ -77,6 +78,7 @@ export function buildChampionsAgent(opts: BuildChampionsAgentOptions = {}) {
       calculateSpeedTool,
       optimizeSpreadTool,
       readEvidenceTool,
+      webSearchTool,
     ],
     subagents: [setDesigner],
     middleware: [doctrineGuardMiddleware()],
@@ -111,6 +113,8 @@ export {
   calculateSpeedTool,
   optimizeSpreadTool,
   readEvidenceTool,
+  webSearchTool,
+  THREAT_SOURCES,
   buildSetDesignerGraph,
   SetDraftSchema,
   doctrineGuardMiddleware,

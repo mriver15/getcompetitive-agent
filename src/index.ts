@@ -23,6 +23,8 @@ export {
   type BuildChampionsAgentOptions,
 } from "./agent.js";
 
+export { webSearchTool, THREAT_SOURCES, type ThreatSource } from "./tools/web.js";
+
 export {
   resolveEntity,
   type ResolutionResult,

@@ -10,6 +10,7 @@ import { HumanMessage } from "@langchain/core/messages";
 import { resolveEntityTool, lookupFactTool, searchDexTool, expandResultTool } from "./tools/dex-query.js";
 import { stageSetTool, saveSetTool, searchSavedSetsTool } from "./tools/set-lifecycle.js";
 import { calculateDamageTool, calculateSpeedTool, readEvidenceTool } from "./tools/evidence.js";
+import { webSearchTool } from "./tools/web.js";
 import { buildSetDesignerGraph, type DesignModel } from "./graph/set-designer.js";
 import { buildChampionsAgent } from "./agent.js";
 
@@ -135,6 +136,10 @@ async function main(): Promise<void> {
 
   const evRead = JSON.parse(await readEvidenceTool.invoke({ evidenceRef: dmg.evidenceRef }, toolConfig()));
   check("read_evidence returns compact summary", evRead.operation === "calculate_damage" && evRead.result !== undefined, evRead.operation);
+
+  // WEB fallback: without TAVILY_API_KEY the tool degrades to a clear error.
+  const web = JSON.parse(await webSearchTool.invoke({ query: "Annihilape usage stats" }, toolConfig()));
+  check("web_search degrades gracefully without TAVILY_API_KEY", web.provenance === "WEB" && typeof web.error === "string", web.error);
 
   console.log("== Set Designer graph (Phase 4) ==");
 
