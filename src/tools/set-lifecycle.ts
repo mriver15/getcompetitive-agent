@@ -84,7 +84,13 @@ export const saveSetTool = tool(
       label: args.label,
       tags: args.tags,
     });
-    return JSON.stringify({ setRef: ref, deduped, savedSet: saved });
+    // Compact summary only — the full SavedSet is queryable via search_saved_sets.
+    return JSON.stringify({
+      setRef: ref,
+      deduped,
+      species: saved.set.species,
+      regulation: saved.regulation,
+    });
   },
   {
     name: "save_set",
@@ -115,7 +121,7 @@ export const searchSavedSetsTool = tool(
     const store = getStore(runtime);
     if (!store) return JSON.stringify({ count: 0, sets: [] });
     const sets = await listSavedSets(store, getUserId(runtime));
-    const filtered = filterSavedSets(sets, args);
+    const filtered = filterSavedSets(sets, { ...args, limit: args.limit ?? 20 });
     return JSON.stringify({ count: filtered.length, sets: filtered });
   },
   {
