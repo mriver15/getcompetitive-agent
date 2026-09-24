@@ -44,7 +44,7 @@ export interface MoveFilters {
   maxBasePower?: number;
 }
 
-function matchesMoveFilter(move: Move, f: MoveFilters | undefined): boolean {
+export function matchesMoveFilter(move: Move, f: MoveFilters | undefined): boolean {
   if (!f) return true;
   if (f.types?.length && !f.types.some((t) => move.type === t)) return false;
   if (f.categories?.length && !f.categories.includes(move.category)) return false;
@@ -54,10 +54,28 @@ function matchesMoveFilter(move: Move, f: MoveFilters | undefined): boolean {
   return true;
 }
 
+/** Learnset source buckets (from dex.ts learnsetToObj). */
+export const LEARNSET_SOURCES = [
+  "Level-up",
+  "TM",
+  "Egg",
+  "Tutor",
+  "Event",
+  "Raid/Event",
+  "Transfer",
+  "Other",
+  "Pre-evolution",
+] as const;
+
+export interface SpeciesProjectionOptions {
+  moveFilters?: MoveFilters;
+  learnsetSources?: string[];
+}
+
 export async function projectSpecies(
   sp: Species,
   fields: string[],
-  moveFilters?: MoveFilters,
+  opts: SpeciesProjectionOptions = {},
 ): Promise<Record<string, unknown>> {
   const flat = speciesToObj(sp) as unknown as Record<string, unknown>;
   const out: Record<string, unknown> = { name: sp.name, id: sp.id };
@@ -68,15 +86,23 @@ export async function projectSpecies(
       const learnable = await learnableMoveIds(dex, sp);
       const moves = [...learnable]
         .map((id) => dex.moves.get(id))
-        .filter((m) => m.exists && matchesMoveFilter(m, moveFilters));
-      out.moves = moveFilters
+        .filter((m) => m.exists && matchesMoveFilter(m, opts.moveFilters));
+      out.moves = opts.moveFilters
         ? moves
             .map((m) => ({ name: m.name, type: m.type, category: m.category, basePower: m.basePower }))
             .sort((a, b) => a.name.localeCompare(b.name))
         : moves.map((m) => m.name).sort();
     } else if (f === "learnset") {
       const ls = await getDex(GEN).learnsets.getByID(toID(sp.name));
-      out.learnset = learnsetToObj(ls);
+      const obj = learnsetToObj(ls);
+      if (opts.learnsetSources?.length) {
+        const filtered: Record<string, string[]> = {};
+        for (const src of opts.learnsetSources) {
+          if (obj.movesBySource[src]) filtered[src] = obj.movesBySource[src];
+        }
+        obj.movesBySource = filtered;
+      }
+      out.learnset = obj;
     } else {
       remaining.push(f);
     }

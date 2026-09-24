@@ -68,6 +68,11 @@ async function main(): Promise<void> {
   const sm = statusMoves.results?.[0]?.moves;
   check("lookup_fact moveFilters narrows moves", Array.isArray(sm) && sm.length > 0 && sm.length < 60 && sm.every((m: { category?: string }) => m.category === "Status"), sm?.length);
 
+  // learnsetSources narrows the learnset to one source bucket.
+  const ls = JSON.parse(await lookupFactTool.invoke({ kind: "species", names: ["Annihilape"], fields: ["learnset"], learnsetSources: ["TM"] }, toolConfig()));
+  const lsObj = ls.results?.[0]?.learnset;
+  check("lookup_fact learnsetSources narrows to a source", lsObj?.movesBySource && Object.keys(lsObj.movesBySource).length === 1 && "TM" in lsObj.movesBySource, Object.keys(lsObj?.movesBySource ?? {}));
+
   // L-6..L-9: search_dex typed constraints
   const bulky = JSON.parse(await searchDexTool.invoke({ entity: "species", filters: { minBaseStats: { hp: 100, def: 80 }, capabilitiesAny: ["priority"] }, regulation: "m-b", fields: ["types"] }, toolConfig()));
   check("search_dex intersects stat + capability + regulation", typeof bulky.total === "number" && Array.isArray(bulky.preview), bulky.total);
@@ -76,6 +81,10 @@ async function main(): Promise<void> {
   const setup = JSON.parse(await searchDexTool.invoke({ entity: "species", filters: { learnsAll: ["Rage Fist"] }, regulation: "m-b" }, toolConfig()));
   const hasApe = Array.isArray(setup.preview) && setup.preview.some((r: { name: string }) => r.name === "Annihilape");
   check("search_dex learnsAll filter reaches Annihilape", hasApe, setup.total);
+
+  // learnsMove: species that learn at least one move matching type/power criteria.
+  const wm = JSON.parse(await searchDexTool.invoke({ entity: "species", filters: { learnsMove: { types: ["Water"], minBasePower: 60 }, legalOnly: true } }, toolConfig()));
+  check("search_dex learnsMove filter returns species", typeof wm.total === "number" && wm.total > 0, wm.total);
 
   // L-8 / CR-7: large results return a preview + resultRef, paged via expand_result.
   const all = JSON.parse(await searchDexTool.invoke({ entity: "species", limit: 5, sort: { field: "num", direction: "asc" } }, toolConfig()));

@@ -11,7 +11,7 @@ import {
 } from "../core/dex/dex.js";
 import { getDexIndexes, intersectSpecies, DATASET_VERSION } from "../core/dex/indexes.js";
 import { resolveEntity, type EntityType } from "../core/dex/resolver.js";
-import { projectSpecies, projectMove, projectItem, projectAbility, projectNature } from "../core/dex/projections.js";
+import { projectSpecies, projectMove, projectItem, projectAbility, projectNature, matchesMoveFilter, type MoveFilters } from "../core/dex/projections.js";
 import { getRegulationSet } from "../core/dex/regulations.js";
 import { sha256 } from "../core/set/model.js";
 import { SEARCH_NS } from "../core/set/store.js";
@@ -42,12 +42,14 @@ export const lookupFactTool = tool(
     fields,
     regulation,
     moveFilters,
+    learnsetSources,
   }: {
     kind: EntityType;
     names: string[];
     fields: string[];
     regulation?: string;
     moveFilters?: { types?: string[]; categories?: Array<"Physical" | "Special" | "Status">; minBasePower?: number; maxBasePower?: number };
+    learnsetSources?: string[];
   }) => {
     const dex = getDex(GEN);
     const results: Array<Record<string, unknown>> = [];
@@ -61,7 +63,7 @@ export const lookupFactTool = tool(
       let projected: Record<string, unknown>;
       switch (kind) {
         case "species": {
-          projected = await projectSpecies(dex.species.get(res.canonicalName), fields, moveFilters);
+          projected = await projectSpecies(dex.species.get(res.canonicalName), fields, { moveFilters, learnsetSources });
           if (regulation) projected.legalIn = isLegalIn(dex.species.get(res.canonicalName), regulation);
           break;
         }
@@ -101,6 +103,10 @@ export const lookupFactTool = tool(
         })
         .optional()
         .describe("Narrow the 'moves' field. When set, moves are returned as {name, type, category, basePower}."),
+      learnsetSources: z
+        .array(z.string())
+        .optional()
+        .describe("Narrow the 'learnset' field to these sources: Level-up, TM, Egg, Tutor, Event, Raid/Event, Transfer, Other, Pre-evolution."),
     }),
   },
 );
@@ -117,6 +123,15 @@ const SEARCH_FILTERS = z.object({
   typesAny: z.array(z.string()).optional(),
   learnsAll: z.array(z.string()).optional(),
   learnsAny: z.array(z.string()).optional(),
+  learnsMove: z
+    .object({
+      types: z.array(z.string()).optional().describe("Move types (any of)."),
+      categories: z.array(z.enum(["Physical", "Special", "Status"])).optional().describe("Move categories (Status = non-damaging)."),
+      minBasePower: z.number().int().min(0).optional().describe("Minimum base power."),
+      maxBasePower: z.number().int().min(0).optional().describe("Maximum base power."),
+    })
+    .optional()
+    .describe("Keep species that learn at least one move matching these criteria."),
   abilitiesAny: z.array(z.string()).optional(),
   capabilitiesAll: z.array(z.string()).optional(),
   capabilitiesAny: z.array(z.string()).optional(),
@@ -187,6 +202,18 @@ export const searchDexTool = tool(
       for (const m of f.learnsAny) {
         const s = indexes.movesToSpecies.get(toID(m));
         if (s) for (const id of s) union.add(id);
+      }
+      constraintSets.push(union);
+    }
+
+    // learns a move matching type/category/power criteria (union over matching moves).
+    if (f.learnsMove) {
+      const union = new Set<string>();
+      for (const move of dex.moves.all()) {
+        if (move.exists && matchesMoveFilter(move, f.learnsMove as MoveFilters)) {
+          const s = indexes.movesToSpecies.get(move.id);
+          if (s) for (const id of s) union.add(id);
+        }
       }
       constraintSets.push(union);
     }

@@ -45,7 +45,10 @@ export {
   projectItem,
   projectAbility,
   projectNature,
+  matchesMoveFilter,
+  LEARNSET_SOURCES,
   type MoveFilters,
+  type SpeciesProjectionOptions,
 } from "./core/dex/projections.js";
 export { REGULATION_SETS, getRegulationSet, type RegulationSet } from "./core/dex/regulations.js";
 export { stageSet, type StageOptions, type StageOutcome } from "./core/set/stage.js";
